@@ -1,6 +1,6 @@
 {
   "name": "codesign-prd-mcp",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "MCP server: 读取腾讯 CoDesign 产品原型（Axure），提取文字+流程图，生成结构化需求文档，供 AI Coding Agent 使用",
   "type": "module",
   "main": "dist/index.js",
