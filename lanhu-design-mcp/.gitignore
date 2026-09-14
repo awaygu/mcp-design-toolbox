@@ -1,0 +1,6 @@
+# 普通账号登录态（含 cookie/localStorage，含凭据，勿提交）
+.auth/
+
+# Inspector 本地调试配置（含真实 LLM key，勿提交）
+inspector.config.json
+.env

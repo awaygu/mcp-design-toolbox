@@ -1,0 +1,16 @@
+# 普通账号登录态（含 cookie/localStorage，含凭据，勿提交）
+.codesign-mcp
+
+# 本地环境变量（含分享链接与访问密码）
+.env
+.env.local
+
+# 命令行脚本产物
+output
+
+# 编译产物
+dist
+*.tsbuildinfo
+
+# 调试产物
+.debug-out

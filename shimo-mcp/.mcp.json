@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "shimo-i18n": {
+      "command": "node",
+      "args": ["./mcp/shimo-mcp/dist/index.js"],
+      "env": {
+        "SHIMO_COOKIE_FILE": "./.mcp-local/shimo.cookie"
+      }
+    }
+  }
+}

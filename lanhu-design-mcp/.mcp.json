@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "lanhu-vision": {
+      "command": "node",
+      "args": [
+        "./dist/index.js"
+      ],
+      "env": {
+        "VLM_API_KEY": "sk-xxx",
+        "VLM_BASE_URL": "https://api.deepseek.com",
+        "VLM_MODEL": "deepseek-v4-flash-vision-exp",
+        "LANHU_COOKIE_FILE": "./.mcp-local/lanhu.cookie"
+      }
+    }
+  }
+}

@@ -1,0 +1,3 @@
+# shimo-mcp 的本地登录态/密钥（勿提交）
+.mcp-local/
+.env

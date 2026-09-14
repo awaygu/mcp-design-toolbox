@@ -1,0 +1,66 @@
+{
+  "name": "codesign-prd-mcp",
+  "version": "0.1.0",
+  "description": "MCP server: 读取腾讯 CoDesign 产品原型（Axure），提取文字+流程图，生成结构化需求文档，供 AI Coding Agent 使用",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "codesign-prd-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "generate": "tsx scripts/generate-prd.ts",
+    "test:crawl": "tsx scripts/test-crawl.ts",
+    "install:browser": "npx playwright install chromium",
+    "test:doc": "tsx scripts/verify-doc-cleanup.ts",
+    "test:cleanup": "tsx scripts/verify-vlm-cleanup.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "playwright": "^1.51.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "codesign",
+    "axure",
+    "prd",
+    "prototype",
+    "vision"
+  ],
+  "author": {
+    "name": "awaygu",
+    "url": "https://github.com/awaygu"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/awaygu/mcp-design-toolbox.git",
+    "directory": "codesign-prd-mcp"
+  },
+  "homepage": "https://github.com/awaygu/mcp-design-toolbox/tree/main/codesign-prd-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/awaygu/mcp-design-toolbox/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  }
+}

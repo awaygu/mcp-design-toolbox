@@ -1,0 +1,21 @@
+# 各 MCP 私有登录态 / 密钥（子目录也各自忽略，这里兜底）
+**/.auth/
+
+# Node 依赖（若某 MCP 需本地装包）
+**/node_modules/
+
+# TypeScript 编译产物
+**/dist/
+# 各 MCP 的本地登录态/密钥（不提交）
+.mcp-local/
+.env
+
+# 探测脚本与登录态（含 cookie），不入库
+.probe/
+
+# Inspector 本地调试配置（含明文密钥），不入库
+inspector.config.json
+
+# codesign-mcp 本地缓存（截图/页面缓存/VLM 结果）。
+# 该目录以 process.cwd() 为根，从仓库根启动 MCP 时会落在仓库根，故这里兜底忽略。
+.codesign-mcp/
