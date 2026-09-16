@@ -5,7 +5,7 @@
 
 核心能力：
 
-- **读翻译表**：按工作表（底部标签页）读取行列数据，表头自动识别语言列（中文/繁体/英文/印尼/马来/葡/西/印地/越南/土耳其/阿拉伯…），输出 `[{_row, 中文, 英文, …}]` 结构。
+- **读翻译表**：按工作表（底部标签页）读取行列数据，表头自动识别语言列，输出 `[{_row, 中文, 英文, …}]` 结构。
 - **增量取数**：`rows` 按石墨 UI 行号取指定行、`languages` 按语言码取指定列——文档更新后不必全量重拉。
 - **xlsx 导出**：走石墨「批量下载」通道导出整个文档为 xlsx 落盘；本地零依赖解析出 sheet 清单（石墨没有 sheet 清单 API）。
 - **i18n JSON**：一键生成各语言 `key→文案` 映射，可落盘为 `<lang>.json` 直接喂前端 i18n 框架。
@@ -78,59 +78,9 @@ npm run build    # esbuild 打包到 dist/index.js（单文件）
 
 `url?` 表示可不传：未传时使用环境变量 `SHIMO_URL` 配置的默认文档链接。
 
-### 使用示例
+**分页**：`shimo_read_sheet` 默认最多返回 200 行（`truncated:true` 表示还有更多），大表用 `rows` 按行号分段取，避免撑爆 Agent 上下文。
 
-```
-// 只取某个需求的英文+阿拉伯语列、指定行（增量场景）
-shimo_read_sheet({
-  url: "https://shimo.im/sheets/xxx/yyy",
-  sheet: "会员体系文案",
-  rows: [2, 3, 4],              // 石墨 UI 行号（表头恒为第 1 行，自动带出）
-  languages: ["zh", "en", "ar"] // 语言码或表头名（"英文"/"阿拉伯语"）
-})
-
-// 只把一个工作表导出为独立 xlsx 文件（从整文档 xlsx 抽取，本地零依赖重写）
-shimo_export_xlsx({
-  url: "https://shimo.im/sheets/xxx/yyy",
-  sheet: "会员体系文案",         // 不传=整文档全部工作表
-  outputPath: "output/"
-})
-// → output/会员体系文案.xlsx（含该表全部行列，Excel/WPS 可直接打开）
-
-// 导出 i18n JSON 到本地
-shimo_export_i18n({
-  url: "https://shimo.im/sheets/xxx/yyy",
-  sheet: "1v1活动",
-  outputPath: "src/i18n/"       // → src/i18n/zh.json, src/i18n/en.json, …
-})
-// key 规则（默认，与 multilingual-excel-converter 脚本一致）：
-//   txt_ + 中文首字符编码 + 石墨行号，如第 5 行「登录」→ "txt_30331_5"
-//   中文缺失 → "txt_row_5"；传 keyColumn 则用该列的值作 key
-//   含换行的文案按行拆分 → "txt_30331_5_0"、"txt_30331_5_1"（空行剔除）
-// 行规则：只有中文有值的行 = 分组行（小节标题），不导出（返回 skippedGroups 计数）；
-//   其他语言列缺值时用英文值兜底（如只有中文+英文，则繁体/印尼语等列都用英文）；
-//   漏填会记入 missing 字段（行号/key/缺的语言）并附 warning，兜底只是补救、漏填仍需补填
-```
-
-**分页纪律**：`shimo_read_sheet` 默认最多返回 200 行（`truncated:true` 表示还有更多）。
-大表按行号分段取（如先 `rows:[2..201]` 再 `rows:[202..401]`），避免撑爆 Agent 上下文。
-
-## 数据链路（实测验证，2026-09）
-
-```
-行列数据：GET shimo.im/api/sas/files/{guid}/sheets/values?range={sheet}!A1:Z{end}
-          Cookie 认证；单次 ≤5000 单元格 → 内置按 180 行/块分页，连续 50 空行视为结束
-文件元数据：GET shimo.im/lizard-api/files/{guid}（名称/角色/更新时间）
-xlsx 导出：POST /panda-api/drive/batch_downloads {guids:[guid]}
-          → 轮询 GET /panda-api/drive/tasks/{taskId} 直到 completed
-          → 下载 detail.url（ZIP）→ 解出 xlsx（本地零依赖解析 sheet 清单/单元格）
-```
-
-注意：
-
-- 石墨**没有 sheet 清单 REST API**（前端从加密快照解析），`shimo_list_sheets` 走一次导出通道实现。
-- 表格内容快照（`I-encrypt-*`）是私有加密格式，不可直接解析——读数据一律走 values API。
-- 公开版石墨不识别 `Authorization: Bearer`，只认浏览器 Cookie；企业版 lizard-api 接口对公开版账号返回 404。
+**语言识别**：表头自动识别语言列；识别不到的表头原样保留，可把它当表头名传给 `languages` 或 `keyColumn`。
 
 ## 环境变量
 
@@ -144,26 +94,6 @@ xlsx 导出：POST /panda-api/drive/batch_downloads {guids:[guid]}
 
 > cookie 优先级：工具入参 `cookie` > `SHIMO_COOKIE` > `SHIMO_COOKIE_FILE` 文件。
 > url 优先级：工具入参 `url` > `SHIMO_URL`；都没有时报错提示。注意 `SHIMO_URL` 是文档链接，`SHIMO_BASE_URL` 是站点端点，两者互不相干。
-
-## 语言码对照（表头自动识别）
-
-| 表头关键词 | 语言码 | Android 目录（参考） |
-|---|---|---|
-| 中文 | `zh` | values-zh |
-| 繁体 | `zh-TW` | values-zh-rTW |
-| 英文 | `en` | values（默认） |
-| 印尼语 | `in` | values-in |
-| 马来文 | `ms` | values-ms |
-| 葡萄牙语 | `pt` | values-pt |
-| 西班牙语 | `es` | values-es |
-| 印地语 | `hi` | values-hi |
-| 越南语 | `vi` | values-vi |
-| 土耳其语 | `tr` | values-tr |
-| 阿拉伯语 | `ar` | values-ar |
-| key/文案名 | `_key` | （作 key 列，不是语言） |
-| UI | `_ui` | （翻译备注列，导出时跳过） |
-
-识别不到的表头原样保留，可把它当表头名传给 `languages` 或 `keyColumn`。
 
 ## 开发
 

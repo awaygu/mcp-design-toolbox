@@ -12,8 +12,9 @@ const API_KEY = process.env.VLM_API_KEY || '';
 const BASE_URL = (process.env.VLM_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, '').replace(/\/v1$/, '');
 // VISION_USE_V1=0 切到文档原生的 /chat/completions
 const USE_V1 = process.env.VISION_USE_V1 !== '0';
-// 不设 max_tokens，长 JSON 会被中途截断
-const MAX_TOKENS = Number(process.env.LANHU_VISION_MAX_TOKENS) || 4096;
+// 不设 max_tokens，长 JSON 会被中途截断。8192 兜住推理模型的 reasoning_content
+// （deepseek-flash 实测也带推理且计入预算）；GLM 因推理量大在下方分支另给更高默认值
+const MAX_TOKENS = Number(process.env.LANHU_VISION_MAX_TOKENS) || 8192;
 // DeepSeek 限制：单图 32 MiB、请求体 48 MiB
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 48 * 1024 * 1024;
@@ -104,31 +105,44 @@ function writeVisionCache(key: string, value: unknown): void {
   }
 }
 
-// analyze 用的设计稿理解 prompt：精确数值在 layers 里，视觉模型只做语义理解，禁止 OCR 数值
+// analyze 用的设计稿理解 prompt：精确数值在 layers 里，视觉模型只做语义理解，禁止估算数值；
+// 封面可能是整页合成图（弹窗底下露出整页），明确以前景画板为主体，避免分析越界到 layers 里不存在的背景内容
 export const DESIGN_ANALYZE_PROMPT =
   'You are a senior UI/frontend engineer. Precise geometry (x/y/width/height/font sizes/hex colors) ' +
-  'is provided separately in a layers field — do NOT read or repeat any numeric values from the image. ' +
-  'Your job is ONLY the semantic understanding that data cannot express. Output JSON:\n' +
-  '{"page_type":"login|list|detail|dashboard|activity|form|other",' +
-  '"layout":"top-down section by section: section_name + height tier (xs<8px / s8-24 / m24-48 / l48-120 / xl>120), ' +
-  'e.g. header(l) → banner(xl) → card_list(xl) → tabbar(m)",' +
-  '"components":[{"name":"component name",' +
-  '"position":"format: \\"<tier>, section: <section_name>\\", tier ∈ top-left/top-center/top-right/bottom-bar/center — e.g. \\"top-left, section: event_header_banner\\" / \\"center, section: gift_list_card\\" / \\"bottom-bar, section: tabbar\\" (STRICT format, no other wording)",' +
-  '"type":"button|input|list_item|card|image_banner|tab|header|status_bar|divider|text|icon",' +
-  '"interaction":"static|clickable|input|scrollable|stateful(selected/disabled)"}],' +
-  '"visual_hierarchy":"stacked layers bottom-up: background → cards → content → overlays; any mask/shadow/gradient overlay MUST be stated",' +
-  '"imagery":"for EVERY background/decorative image (including placeholders): 1) what it depicts 2) relation to adjacent text (text-on-image needs a dark scrim / text-on-gradient / standalone no overlay) 3) real asset or placeholder-to-be-replaced; reference components by name",' +
-  '"style_atmosphere":"color mood + font character + corner/spacing style (compact/airy) in natural language, NO hex values",' +
-  '"notes":"details data cannot express: implied motion, implied truncation, icon metaphors"}\n' +
-  'Output discipline: each description ≤30 words; at most 15 components, most important first. Only output JSON.';
+  'is provided separately in a layers field — do NOT estimate or output any numeric sizes or colors from the image. ' +
+  'Your job is ONLY the semantic understanding that data cannot express.\n' +
+  'SCOPE: the image may show content beyond the main artboard (e.g. a full page visible behind a modal). ' +
+  'Analyze the FOREGROUND artboard/screen as the subject; surrounding content is context only — mention it only in notes.\n' +
+  'Output JSON:\n' +
+  '{"page_type": EXACTLY one of "login|onboarding|list|detail|dashboard|profile|settings|form|search|landing|popup|bottom_sheet|other",' +
+  '"layout":"top-down sections chained by →, each as name: short role; ' +
+  'names are snake_case identifiers reused by components.section",' +
+  '"components":[interactive/structural elements of the FOREGROUND artboard ONLY (buttons, inputs, cards, list items, tabs, nav bars, banners, toggles, tables) — ' +
+  'NEVER plain text labels or icons, the layers field already enumerates them with exact geometry; elements belonging to background/context content stay out of this list (notes only); ' +
+  'at most 20, most important first; an element repeating identically is listed ONCE with a repeat count like "card ×7"; ' +
+  'if some must be dropped, keep interactive over decorative and name the dropped ones in notes. Each:' +
+  '{"name":"snake_case identifier",' +
+  '"type":"button|input|card|list_item|tab|nav|banner|toggle|table|other",' +
+  '"section":"exact layout section name it belongs to",' +
+  '"interaction":"static|clickable|input|toggle|swipe|scrollable"}],' +
+  '"states":["visible state variations and their meaning, e.g. \\"selected card: gold border = checked-in today; other cards: idle\\"; [] if single-state"],' +
+  '"imagery":"for EVERY image and overlay (mask/scrim/gradient): 1) what it depicts or does 2) relation to adjacent text ' +
+  '(text-on-image needs a dark scrim / text-on-gradient / standalone no overlay) 3) real asset or placeholder-to-be-replaced; reference sections/components by name",' +
+  '"style_atmosphere":"color mood + font character + spacing rhythm (compact/airy), plus reusable style groups you can spot (e.g. one primary-button style, one card style shared by all cards) — natural language, NO hex values",' +
+  '"notes":"what data cannot express: implied motion, implied truncation, icon metaphors; AND anomalies — duplicate/mislabelled text, ' +
+  'copy-paste leftovers, placeholder copy, assets visible in the image but seemingly missing from the data; whether content exists beyond the artboard"}\n' +
+  'FORMAT EXAMPLES — they demonstrate format & level of detail ONLY; never copy their content, names, or theme into your output:\n' +
+  'Mobile app screen: {"page_type":"detail","layout":"player_header: cover art & back → track_info: title & artist → controls: transport controls → up_next: queued tracks","components":[{"name":"play_button","type":"button","section":"controls","interaction":"clickable"},{"name":"seek_bar","type":"input","section":"controls","interaction":"input"},{"name":"queue_item ×12","type":"list_item","section":"up_next","interaction":"clickable"}],"states":["play_button shows a pause icon = track currently playing; no queue row highlighted"],"imagery":"full-bleed cover art sits behind track_info, its title text needs a dark scrim; artist avatar is a real asset; queue rows use small thumbnails","style_atmosphere":"dark theme, neon accent, compact rhythm","notes":"implied motion: equalizer bars animate on the playing row; anomaly: track title ends in an ellipsis, likely truncated"}\n' +
+  'Desktop web page: {"page_type":"dashboard","layout":"sidebar: section nav → topbar: search & account → kpi_row: metric cards → chart_area: trend charts","components":[{"name":"nav_item ×6","type":"tab","section":"sidebar","interaction":"clickable"},{"name":"search_field","type":"input","section":"topbar","interaction":"input"},{"name":"metric_card ×4","type":"card","section":"kpi_row","interaction":"static"},{"name":"export_button","type":"button","section":"chart_area","interaction":"clickable"}],"states":["nav_item: filled background = active section; export_button disabled until a chart is selected"],"imagery":"sparkline glyphs inside metric cards are decorative real assets; no text-on-image","style_atmosphere":"light theme, single blue accent, dense data rhythm","notes":"sidebar chevron implies it collapses; scrollbar implies more rows below the fold; no anomalies"}\n' +
+  'Discipline: each description ≤30 words; everything in English except verbatim UI text quotes; Only output JSON.';
 
 // analyze 提示词组装：设计稿名 + 调用方关注点作为背景上下文注入（如「个人中心-设置弹窗」能直接点明页面类型与业务含义）。
-// 两者都仅供参考——必须声明"只描述可见内容、保持 JSON 结构"，防止模型迎合名字脑补组件或被自由文本带偏格式
+// 名字不作为组件清单的依据（防迎合名字脑补）；封面的背景页不算主体，分析范围锁定前景画板
 export function designAnalyzePrompt(designName?: string, focus?: string): string {
   const name = designName?.trim();
   const hint = name
-    ? `\n\nContext: the design file is named "${name}" (from the design tool). Use it as background context only. ` +
-      'Describe ONLY what is actually visible in the image; if the visual contradicts the name, trust the visual.'
+    ? `\n\nContext: the design file is named "${name}" (from the design tool). Use it as background context only — ` +
+      'do not invent components to match the name, and keep the analysis scoped to the foreground artboard even when more content is visible.'
     : '';
   const callerFocus = focus?.trim()
     ? `\n\nAdditional focus from the caller (business context / priorities — reflect them in your analysis, ` +
@@ -230,6 +244,9 @@ async function doCallVision({ images = [], text, detail = 'auto' }: VisionInput,
   };
   // GLM 不支持关闭 thinking；其它端点忽略这两个字段
   if (/glm/i.test(MODEL)) {
+    // GLM 的 thinking 推理 token 与正文共享 max_tokens（实测单次推理可写 4k+ token），
+    // 4096 会在正文起头处掐断 → JSON 截断回退 _raw；失败态不进缓存且温度 0，每次必然复现
+    body.max_tokens = Number(process.env.LANHU_VISION_MAX_TOKENS) || 16384;
     body.thinking = { type: 'enabled', clear_thinking: false };
     body.reasoning_effort = 'max';
   }

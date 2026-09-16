@@ -86,7 +86,7 @@ export function registerTools(server: McpServer): void {
         projectId: z.string().optional().describe('项目 UUID（imageId 模式必填；url 模式不需要）'),
         cookie: z.string().optional().describe('登录 cookie 串（也可用 LANHU_COOKIE / LANHU_COOKIE_FILE）'),
         analyze: z.boolean().optional().describe('用视觉模型理解封面图，返回 visionAnalysis；不传时按是否配置了视觉模型自动决定（配了就 true）'),
-        analyzeFocus: z.string().optional().describe('注入视觉模型的额外关注点/业务背景（如「重点分析签到奖励领取规则」「关注按钮的禁用态」），让分析更贴合当前任务；不影响返回 JSON 结构，仅 analyze 执行时生效'),
+        analyzeFocus: z.string().optional().describe('注入视觉模型的额外关注点/业务背景（如「重点分析签到弹窗，忽略遮罩层底下的内容」「关注按钮的禁用态」），让分析更贴合当前任务；不影响返回 JSON 结构，仅 analyze 执行时生效'),
       },
     },
     async (args) => {
