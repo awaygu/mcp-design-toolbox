@@ -1,7 +1,7 @@
 {
   "name": "shimo-mcp",
-  "version": "0.1.1",
-  "description": "MCP server: 读取石墨文档多语言翻译表（Cookie 直调公开版 API），支持按工作表/行/语言取数与 xlsx 导出",
+  "version": "0.2.0",
+  "description": "MCP server: 结构化读取石墨文档表格（Cookie 直调公开版 API），支持按工作表/行/列增量取数与 xlsx 导出",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

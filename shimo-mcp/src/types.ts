@@ -1,12 +1,14 @@
 // types.ts — 共享类型定义
 
-/** 一行翻译数据：列名（表头）→ 单元格文本 */
+/** 一行表格数据：列名（表头）→ 单元格文本 */
 export type Row = Record<string, string | number>;
 
 /** 表格数据：表头行 + 数据行 */
 export interface SheetData {
   sheet: string;
   headers: string[];
+  /** 表头行整行为空时自动合成 Col1..ColN 假表头（这些列不视为正式数据列） */
+  headersSynthesized?: boolean;
   /** 数据行（不含表头），每行是 列名→文本 映射；行号从 2 起（对应石墨 UI 行号） */
   rows: Array<Row & { _row: number }>;
   totalRows: number;
