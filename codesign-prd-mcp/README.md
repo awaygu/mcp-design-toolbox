@@ -102,10 +102,10 @@ npm run test:doc   # 文档输出清理回归：规则去重 / 表格合并 / �
 
 ```bash
 # 生成需求文档
-npm run generate -- --url=https://codesign.qq.com/s/xxx --group=会员体系优化 --password=XXXX
+npm run generate -- --url=https://codesign.qq.com/s/xxx --group=<需求分组名> --password=XXXX
 
 # 只验证爬取层（不调视觉模型）
-npm run test:crawl -- --url=https://codesign.qq.com/s/xxx --group=会员体系优化 --password=XXXX
+npm run test:crawl -- --url=https://codesign.qq.com/s/xxx --group=<需求分组名> --password=XXXX
 
 # 也可用环境变量代替参数：CODESIGN_URL / CODESIGN_GROUP / CODESIGN_PASSWORD
 ```

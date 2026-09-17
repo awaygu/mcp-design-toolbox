@@ -223,7 +223,7 @@ server.registerTool(
       password: z.string().optional().describe('访问密码；不传时使用环境变量 CODESIGN_PASSWORD'),
       groupName: z
         .string()
-        .describe('需求分组名称，如"会员体系优化"；同名歧义时用完整路径。分组名不确定时可直接调用，失败会返回候选列表'),
+        .describe('需求分组名称（如 "新手引导"）；同名歧义时用完整路径。分组名不确定时可直接调用，失败会返回候选列表'),
       vlmEnabled: z.boolean().optional().describe('是否启用 VLM 解析，默认 true'),
       detailLevel: z
         .enum(['summary', 'standard', 'full'])

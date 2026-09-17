@@ -20,7 +20,7 @@ AI 编码 Agent（Claude Code / Cursor / Trae / opencode…）写代码很快，
 
 - 需求原型画在 **腾讯 CoDesign（Axure）** 里 —— 它读不到 PRD，只能靠你复制粘贴；
 - 设计稿挂在 **蓝湖** 上 —— 它拿不到精确的图层/色值/字号，只能靠截图 OCR 猜；
-- 翻译文案锁在 **石墨表格** 里 —— 它取不出 i18n 数据，只能让你手动导出。
+- 翻译文案锁在 **石墨表格** 里 —— 它取不出文案数据，只能让你手动导出。
 
 本仓库把这三步全部接进 [MCP 协议](https://modelcontextprotocol.io/)，形成一条 **"需求 → 设计 → 文案 → 验收"** 的 AI 编码数据供给闭环：
 
@@ -28,7 +28,7 @@ AI 编码 Agent（Claude Code / Cursor / Trae / opencode…）写代码很快，
 get_requirement_doc  →  拿到结构化 PRD（原型自动遍历 + 视觉解析）
 lanhu_fetch_design   →  拿到图层树精确数值（x/y/色值/字号/圆角…）
         ↓  AI 写代码
-shimo_export_i18n    →  一键产出各语言 JSON（漏填自动预警）
+shimo_export_i18n    →  产出各语言 i18n JSON（列映射配置表：exact/regex/fuzzy）
 vision_defect_check  →  渲染结果 vs 设计稿验收（缺陷检测 / E2E 归因）
 ```
 
@@ -38,7 +38,7 @@ vision_defect_check  →  渲染结果 vs 设计稿验收（缺陷检测 / E2E �
 | --- | --- | --- |
 | **[lanhu-design-mcp](./lanhu-design-mcp/)** [![npm](https://img.shields.io/npm/v/lanhu-design-mcp)](https://www.npmjs.com/package/lanhu-design-mcp) | 蓝湖设计稿读取 + 视觉理解/验收 | 官方 API 结构化图层树（**不靠 OCR 猜小字**）；团队→项目→分组→稿 全层级枚举；切图下载；渲染对比 / UI 缺陷检测 / E2E 失败归因 |
 | **[codesign-prd-mcp](./codesign-prd-mcp/)** [![npm](https://img.shields.io/npm/v/codesign-prd-mcp)](https://www.npmjs.com/package/codesign-prd-mcp) | 腾讯 CoDesign 原型 → 结构化 PRD | 一个调用遍历整个需求分组：分段截图 + VLM 解析成纯文本需求文档；大文档自动落盘防撑爆上下文；两级缓存，重跑秒回 |
-| **[shimo-mcp](./shimo-mcp/)** [![npm](https://img.shields.io/npm/v/shimo-mcp)](https://www.npmjs.com/package/shimo-mcp) | 石墨多语言翻译表 → i18n JSON | Cookie 直调官方 values API（零浏览器依赖）；行号/语言列增量取数；自动识别语言列；`txt_中文首字码+行号` key 规则、分组行识别、漏填预警 |
+| **[shimo-mcp](./shimo-mcp/)** [![npm](https://img.shields.io/npm/v/shimo-mcp)](https://www.npmjs.com/package/shimo-mcp) | 石墨表格 → i18n JSON | Cookie 直调官方 values API（零浏览器依赖）；行号/列增量取数；列映射配置表（exact/regex/fuzzy）适配任意列名；大表分页 |
 
 三者均为 **stdio MCP server**，可被任意支持 MCP 的宿主接入：Claude Code / Cursor / Trae / opencode / MCP Inspector…
 
@@ -61,7 +61,7 @@ vision_defect_check  →  渲染结果 vs 设计稿验收（缺陷检测 / E2E �
 }
 ```
 
-准备 cookie：浏览器登录石墨 → F12 → Network → 复制任意请求的 `Cookie` 头，存进 `SHIMO_COOKIE_FILE` 指向的本地文件。重启 Agent，直接说"读一下翻译表里的 1v1活动 工作表，导出 en/ar 的 i18n JSON"即可。✅
+准备 cookie：浏览器登录石墨 → F12 → Network → 复制任意请求的 `Cookie` 头，存进 `SHIMO_COOKIE_FILE` 指向的本地文件。重启 Agent，直接说"把翻译表里 xx 工作表导出成 i18n JSON"即可（列名与内置识别不同时，配一份 `shimo-column-map.json`）。✅
 
 > 蓝湖 / CoDesign 的接入分别见其目录内 README（蓝湖带双击即用的登录脚本；两者配一个 OpenAI 兼容视觉模型的 Key 即可解锁截图解析）。
 > 想改代码或参与开发：`git clone https://github.com/awaygu/mcp-design-toolbox.git` 后在子目录 `npm install && npm run build`，把上面的 `command`/`args` 换成 `node` + `dist/index.js` 绝对路径即可。
@@ -82,7 +82,6 @@ mcp-design-toolbox/
 ├── codesign-prd-mcp/      # CoDesign：原型 → PRD
 ├── shimo-mcp/             # 石墨：翻译表 → i18n JSON
 └── scripts/               # 仓库级辅助脚本（Inspector 补丁等）
-```
 ```
 
 每个子目录自包含 `package.json` / `README.md` /（部分含）`.mcp.json` 示例，可独立使用、独立分发。

@@ -124,7 +124,7 @@ async function collectTreeItems(): Promise<TreeNode[] | null> {
 
 /**
  * 按层级栈为扁平节点推导完整路径（祖先分组名 + 自身，用 / 连接）。
- * 同名页面靠路径成为唯一地址，如「会员体系优化/流程图」。
+ * 同名页面靠路径成为唯一地址，如「活动/流程图」。
  */
 export function buildTreePaths<T extends TreeNode>(items: T[]): (T & { path: string })[] {
   const stack: { level: number; name: string }[] = [];
@@ -296,7 +296,7 @@ export function matchTreeTarget<T extends { name: string; path: string }>(
   const exactNames = pool.filter((i) => i.name === name);
   if (exactNames.length === 1) return { ok: true, target: exactNames[0] };
 
-  // 3) 路径尾部匹配（含部分段，如「优化/流程图」命中「会员体系优化/流程图」）
+  // 3) 路径尾部匹配（含部分段，如「流程图」命中「活动/流程图」）
   const pathSuffix = pool.filter((i) => i.path.endsWith(name));
   if (pathSuffix.length === 1) return { ok: true, target: pathSuffix[0] };
 
@@ -411,7 +411,7 @@ function resolveGroup(
  * 也可能只是展开/收起目录。策略：先快速点击分组节点探测 iframe 是否切换，
  * 切换且非空白才把分组自身页计入结果，再遍历子页面。
  *
- * @param groupName - 分组名称（如"会员体系优化/流程图"或叶子名）
+ * @param groupName - 分组名称（如"活动/流程图"或叶子名）
  * @param url - 分享链接，用于页面级缓存键
  * @param opts.pageNames - 只处理指定页面（叶子名或完整路径），未命中的名字返回合成错误页
  * @param opts.onProgress - 逐页进度回调（MCP 层转发为 progress 通知）
