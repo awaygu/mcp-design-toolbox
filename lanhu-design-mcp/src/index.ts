@@ -16,7 +16,7 @@ async function main(): Promise<void> {
 
   const server = new McpServer({
     name: 'lanhu-design-mcp',
-    version: '2.0.0',
+    version: '0.3.0',
   }, {
     // server 级工作流说明：宿主会注入 Agent 系统上下文（README 里的提示词骨架住在这里，
     // Agent 不看 README，只有这里的内容它能稳定看到）

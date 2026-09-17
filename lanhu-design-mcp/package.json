@@ -1,6 +1,6 @@
 {
   "name": "lanhu-design-mcp",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "蓝湖设计稿 MCP Server — 官方 API 读稿 + 分组枚举 + 视觉理解/验收",
   "type": "module",
   "main": "dist/index.js",
