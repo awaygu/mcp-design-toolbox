@@ -7,6 +7,7 @@
 
 - **读表格**：按工作表（底部标签页）读取行列数据，输出 `[{_row, 中文, 英文, …}]` 结构。
 - **增量取数**：`rows` 按石墨 UI 行号取指定行、`columns` 按表头名/列序取指定列——文档更新后不必全量重拉。
+- **单列直读**：`shimo_read_column` 传一个表头名/列序即返回 `[{_row, value}]` 行号→值列表（空值保留，缺翻译行一目了然）；配 `rows:[行号]` 可精确取「某行在某列」的值。
 - **清洗与结构化**：单元格统一为文本、空行剔除且行号对齐石墨 UI、表头缺失自动合成。
 - **i18n 导出（可选）**：生成各语言 key→文案 JSON；列→语言映射由配置表驱动（exact/regex/fuzzy 三种匹配），key 规则、缺值兜底、分组行全部可配，不写死任何团队约定。
 - **xlsx 导出**：走石墨「批量下载」通道导出整个文档为 xlsx 落盘；本地零依赖解析出 sheet 清单（石墨没有 sheet 清单 API）。
@@ -75,6 +76,7 @@ npm run build    # esbuild 打包到 dist/index.js（单文件）
 |---|---|---|
 | `shimo_check_auth` | 探活 cookie（可顺带返回文档名/权限/更新时间） | `url?` / `cookie` |
 | `shimo_read_sheet` ⭐ | 读单个工作表：表头+数据行（带 `_row` 石墨行号） | `url?` / `sheet` / `rows?` / `columns?` / `limit?` |
+| `shimo_read_column` | 读单列：`[{_row, value}]` 行号→值列表（空值保留；配 `rows:[行号]` 精确取某行在某列的值） | `url?` / `sheet` / `column` / `rows?` / `limit?` |
 | `shimo_list_sheets` | 列出全部工作表名（走 xlsx 导出通道解析，约 5~20s） | `url?` |
 | `shimo_export_xlsx` | 导出 xlsx 落盘；传 `sheet` 则从整文档抽取该单个工作表另存为独立 xlsx | `url?` / `sheet?` / `outputPath?` / `fileName?` |
 | `shimo_export_i18n` | 生成各语言 key→文案 映射 JSON（多行文案拆 key_N；缺值兜底 + 漏填清单；列映射配置表驱动，适配任意列名） | `url?` / `sheet` / `columns?` / `columnMap?` / `keyColumn?` / `fallbackLanguage?` / `groupRows?` / `rows?` / `outputPath?` |
@@ -104,7 +106,7 @@ npm run build    # esbuild 打包到 dist/index.js（单文件）
 
 `url?` 表示可不传：未传时使用环境变量 `SHIMO_URL` 配置的默认文档链接。
 
-**分页**：`shimo_read_sheet` 默认最多返回 200 行（`truncated:true` 表示还有更多），大表用 `rows` 按行号分段取，避免撑爆 Agent 上下文。
+**分页**：`shimo_read_sheet` 默认最多返回 200 行（`truncated:true` 表示还有更多），大表用 `rows` 按行号分段取，避免撑爆 Agent 上下文。`shimo_read_column` 单列体积小，默认放宽到 500 行，取法相同。
 
 **语言识别（仅 `shimo_export_i18n`）**：按表头自动识别语言列（内置常见语言关键词 + `columnMap` 配置）；识别不到的表头原样保留，可把它当表头名传给 `columns` 或 `keyColumn`。
 

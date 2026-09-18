@@ -1,6 +1,6 @@
 // sheet.ts — 表格数据整形：表头识别、行/列/行号过滤，输出结构化数据（纯结构层，不做业务加工）
 import { readSheetRaw, type Credentials } from './shimo-client.js';
-import type { SheetData } from './types.js';
+import type { ColumnData, SheetData } from './types.js';
 
 /** 单元格 → 文本（数字/公式结果转字符串；null/undefined → ''） */
 function cellText(v: unknown): string {
@@ -99,8 +99,40 @@ export async function readSheet(guid: string, sheet: string, creds: Credentials,
     sheet,
     headers: keepCols ? keepCols.map((i) => finalHeaders[i].trim() || `Col${i + 1}`) : finalHeaders.filter((h, i) => h.trim() || !!rawRows.some((r) => r[i])),
     headersSynthesized: !hasHeader || undefined,
+    ...(keepCols ? { columnIndexes: keepCols } : {}),
     rows: dataRows,
     totalRows: total,
     truncated,
+  };
+}
+
+/**
+ * 读一个工作表的单列：column 为表头名（忽略大小写全等）或第几列（1-based）。
+ * 复用 readSheet 的列过滤/行号/分页逻辑；空值保留为 ''，方便定位缺行。
+ */
+export async function readColumn(
+  guid: string,
+  sheet: string,
+  creds: Credentials,
+  column: string | number,
+  opts: { rows?: number[]; limit?: number; maxCol?: number } = {}
+): Promise<ColumnData> {
+  const data = await readSheet(guid, sheet, creds, {
+    ...(opts.rows?.length ? { rows: opts.rows } : {}),
+    columns: [column],
+    limit: opts.limit ?? 500,
+    ...(opts.maxCol !== undefined ? { maxCol: opts.maxCol } : {}),
+  });
+  const header = data.headers[0] ?? '';
+  const values = data.rows.map((r) => ({ _row: r._row, value: (r[header] === undefined ? '' : String(r[header])) }));
+  return {
+    sheet: data.sheet,
+    column: header,
+    columnIndex: (data.columnIndexes?.[0] ?? 0) + 1,
+    ...(data.headersSynthesized ? { headersSynthesized: true } : {}),
+    values,
+    nonEmpty: values.filter((v) => v.value.trim()).length,
+    totalRows: data.totalRows,
+    truncated: data.truncated,
   };
 }

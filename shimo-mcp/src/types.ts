@@ -11,6 +11,23 @@ export interface SheetData {
   headersSynthesized?: boolean;
   /** 数据行（不含表头），每行是 列名→文本 映射；行号从 2 起（对应石墨 UI 行号） */
   rows: Array<Row & { _row: number }>;
+  /** 传 columns 过滤时返回：每个返回表头对应的原始列序（0-based），与 headers 一一对应 */
+  columnIndexes?: number[];
+  totalRows: number;
+  truncated: boolean;
+}
+
+/** 单列读取结果：values 按行号升序，空值保留为 ''（缺行/缺翻译可见） */
+export interface ColumnData {
+  sheet: string;
+  /** 命中的表头原文（表头行全空时为合成的 ColN） */
+  column: string;
+  /** 原始列序（1-based，与石墨 UI 列号一致） */
+  columnIndex: number;
+  headersSynthesized?: boolean;
+  values: Array<{ _row: number; value: string }>;
+  /** values 中非空值的条数 */
+  nonEmpty: number;
   totalRows: number;
   truncated: boolean;
 }

@@ -38,7 +38,7 @@ vision_defect_check  →  渲染结果 vs 设计稿验收（缺陷检测 / E2E �
 | --- | --- | --- |
 | **[lanhu-design-mcp](./lanhu-design-mcp/)** [![npm](https://img.shields.io/npm/v/lanhu-design-mcp)](https://www.npmjs.com/package/lanhu-design-mcp) | 蓝湖设计稿读取 + 视觉理解/验收 | 官方 API 结构化图层树（**不靠 OCR 猜小字**）；团队→项目→分组→稿 全层级枚举；切图下载；渲染对比 / UI 缺陷检测 / E2E 失败归因 |
 | **[codesign-prd-mcp](./codesign-prd-mcp/)** [![npm](https://img.shields.io/npm/v/codesign-prd-mcp)](https://www.npmjs.com/package/codesign-prd-mcp) | 腾讯 CoDesign 原型 → 结构化 PRD | 一个调用遍历整个需求分组：分段截图 + VLM 解析成纯文本需求文档；大文档自动落盘防撑爆上下文；两级缓存，重跑秒回 |
-| **[shimo-mcp](./shimo-mcp/)** [![npm](https://img.shields.io/npm/v/shimo-mcp)](https://www.npmjs.com/package/shimo-mcp) | 石墨表格 → i18n JSON | Cookie 直调官方 values API（零浏览器依赖）；行号/列增量取数；列映射配置表（exact/regex/fuzzy）适配任意列名；大表分页 |
+| **[shimo-mcp](./shimo-mcp/)** [![npm](https://img.shields.io/npm/v/shimo-mcp)](https://www.npmjs.com/package/shimo-mcp) | 石墨表格 → i18n JSON | Cookie 直调官方 values API（零浏览器依赖）；行号/列增量取数；单列直读（某行某列的值一次命中）；列映射配置表（exact/regex/fuzzy）适配任意列名；大表分页 |
 
 三者均为 **stdio MCP server**，可被任意支持 MCP 的宿主接入：Claude Code / Cursor / Trae / opencode / MCP Inspector…
 

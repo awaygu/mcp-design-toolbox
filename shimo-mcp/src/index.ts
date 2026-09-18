@@ -13,7 +13,7 @@ import {
   getFileMeta,
   type Credentials,
 } from './shimo-client.js';
-import { readSheet } from './sheet.js';
+import { readSheet, readColumn } from './sheet.js';
 import { toLanguageMap } from './i18n.js';
 import { extractXlsxFromZip, parseXlsx, buildXlsx } from './xlsx.js';
 import { parseColumnMap, type ColumnMapRule } from './langmap.js';
@@ -84,9 +84,10 @@ const server = new McpServer(
       '1. shimo_check_auth 探活 cookie（401/空数据时先调它区分「cookie 过期」与「无权限」）。',
       '2. shimo_list_sheets 列出全部工作表名（走 xlsx 导出通道，同时返回每个表的行列数与表头预览）。',
       '3. shimo_read_sheet 读单个工作表：默认返回前 200 行；文档更新后只看改动时传 rows:[行号]（行号=石墨 UI 行号，表头恒在第 1 行），或 columns:[列] 只要某几列。',
-      '4. shimo_export_i18n 生成各语言 key→文案 JSON：列→语言的映射支持 columnMap 参数或 .mcp-local/shimo-column-map.json 配置表（exact/regex/fuzzy 三种匹配），适配任意列名；key 规则(keyColumn)、缺值兜底(fallbackLanguage)、分组行(groupRows) 均可配置。',
-      '5. shimo_export_xlsx 把整个文档导出为 xlsx 落盘（本地解析出 sheet 清单；产物可直接给 Excel 用户）。',
-      '6. url 可用环境变量 SHIMO_URL 预置默认文档链接，配置后调用无需重复传 url。',
+      '4. shimo_read_column 读单列：返回 [{_row, value}] 行号→值列表；只要「某行在某列」的值时传 column+rows:[行号] 直接命中，不必拉整表。',
+      '5. shimo_export_i18n 生成各语言 key→文案 JSON：列→语言的映射支持 columnMap 参数或 .mcp-local/shimo-column-map.json 配置表（exact/regex/fuzzy 三种匹配），适配任意列名；key 规则(keyColumn)、缺值兜底(fallbackLanguage)、分组行(groupRows) 均可配置。',
+      '6. shimo_export_xlsx 把整个文档导出为 xlsx 落盘（本地解析出 sheet 清单；产物可直接给 Excel 用户）。',
+      '7. url 可用环境变量 SHIMO_URL 预置默认文档链接，配置后调用无需重复传 url。',
     ].join('\n'),
   }
 );
@@ -154,7 +155,43 @@ server.registerTool(
   }
 );
 
-// ─── 工具3：工作表清单（xlsx 通道，仅内存解析，不落盘） ───────────
+// ─── 工具3：读单列（行号→值列表） ────────────────────────────────
+
+server.registerTool(
+  'shimo_read_column',
+  {
+    description:
+      '读工作表的单列数据，返回 [{_row, value}] 行号→值列表（_row=石墨 UI 行号，与网页所见一致）。' +
+      '要「某一行在某列的值」（如第 30 行的英文文案）时最直接：column + rows:[30] 一次命中，不必拉整表；' +
+      '只传 column 则返回整列，空值保留为空串（哪些行缺翻译一目了然）。' +
+      'column 支持表头名（忽略大小写全等）或第几列（1-based）；无匹配时报错并列出该表全部可用列。' +
+      '默认最多 500 行，truncated=true 表示还有更多，用 rows 传后续行号继续取。',
+    inputSchema: {
+      url: z.string().optional().describe('石墨文档链接；不传时使用环境变量 SHIMO_URL'),
+      sheet: z.string().describe('工作表名（底部标签页名称，来自 shimo_list_sheets 或用户指定）'),
+      column: z
+        .union([z.string().min(1).describe('表头原名（忽略大小写）'), z.number().describe('第几列，从 1 起')])
+        .describe('要读的列：表头名或列序'),
+      rows: z.array(z.number()).optional().describe('只取这些行（石墨 UI 行号，1-based）。如 [30] 即第 30 行在该列的值'),
+      limit: z.number().optional().describe('最多返回多少行，默认 500；0=不限'),
+      cookie: z.string().optional(),
+    },
+  },
+  async (args) => {
+    const guid = requireGuid(args.url);
+    const data = await readColumn(guid, args.sheet, credentials(args), args.column, {
+      ...(args.rows?.length ? { rows: args.rows } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    });
+    const body = {
+      ...data,
+      hint: data.truncated ? `还有更多行：用 rows 传后续行号（当前已到第 ${data.values[data.values.length - 1]?._row} 行）继续取` : undefined,
+    };
+    return { content: [{ type: 'text', text: JSON.stringify(body) }] };
+  }
+);
+
+// ─── 工具4：工作表清单（xlsx 通道，仅内存解析，不落盘） ───────────
 
 async function exportAndParse(guid: string, creds: Credentials): Promise<ReturnType<typeof parseXlsx>> {
   const handle = await exportWorkbook(guid, creds.cookie);
@@ -203,7 +240,7 @@ server.registerTool(
   }
 );
 
-// ─── 工具4：导出 xlsx 落盘 ───────────────────────────────────────
+// ─── 工具5：导出 xlsx 落盘 ───────────────────────────────────────
 
 server.registerTool(
   'shimo_export_xlsx',
@@ -280,7 +317,7 @@ server.registerTool(
   }
 );
 
-// ─── 工具5：语言映射导出（i18n JSON，映射关系可配置） ─────────────
+// ─── 工具6：语言映射导出（i18n JSON，映射关系可配置） ─────────────
 
 server.registerTool(
   'shimo_export_i18n',
