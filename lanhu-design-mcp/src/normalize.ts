@@ -28,7 +28,7 @@ export function findLayerArray(obj: unknown, depth = 0): unknown[] | null {
 
 // 自动生成名（Frame_xxx/编组N/Rectangle 9943…）对 Agent 无信息量，输出前剔除；
 // Subtract/Union 等是 Sketch 布尔运算的默认名，同属工具自动名；
-// 但蒙版/切片这类词是 verify-spec 去噪信号（NOISE_RE），保留不剔
+// 但蒙版/切片这类词标记的是无效层（蒙版不实现、切片是导出件），保留不剔
 const AUTO_NAME_RE = /^(frame|group|编组|矩形|椭圆|形状|切片|蒙版|layer|rect|image|vector|line|subtract|union|intersect|difference)[\s_-]?\d*$/i;
 const NOISE_MARKER_RE = /^(蒙版|mask|切片|slice)/i;
 const isNoiseName = (name: string): boolean =>
@@ -398,7 +398,7 @@ export function normalizeSketch(json: Record<string, any>): { layers: DesignLaye
   const isContentful = (l: DesignLayer): boolean =>
     !!(l.fill || l.gradient || l.color || l.text || l.imageUrl || l.hasExportImage || l.border || l.shadow || l.innerShadow);
   // 自动生成名对 AI 无信息量，且会吃掉过滤省下的字节（判定同 isNoiseName，但不含蒙版/切片豁免——
-  // 这类词不该进 parentPath，只该留在层名上给 verify-spec 去噪用）
+  // 这类词不该进 parentPath，只该留在层名上标记该层为蒙版/切片）
   const meaningfulName = (name: string): boolean => !AUTO_NAME_RE.test(name.trim());
   const walk = (items: unknown[], path: string[]) => {
     for (const s of items) {
@@ -408,7 +408,7 @@ export function normalizeSketch(json: Record<string, any>): { layers: DesignLaye
       // 蓝湖/Figma 的隐藏层（设计者手动关掉可见性）整棵子树都不可见，跳过且不再下钻
       if (shape.visible === false) continue;
       const shapeName = String(shape.name || '');
-      // 「备份/backup」命名的备用层实际开发不实现（与 verify-spec 的 NOISE_RE 立场一致），子树一并跳过
+      // 「备份/backup」命名的备用层实际开发不实现，子树一并跳过
       if (/备份|backup/i.test(shapeName)) {
         backupLayerCount += subtreeSize(shape);
         continue;
@@ -480,7 +480,7 @@ export function normalizeSketch(json: Record<string, any>): { layers: DesignLaye
 
   // ③ 遮挡剔除：被上方完全不透明纯色矩形整体盖住的层不可见。
   //    护栏：遮挡物只认纯色不透明填充（渐变/半透明/文案不放行，避免混合模式与渐变透明段的误判）；
-  //    文案与切图层永不剔除（文案是 verify-spec 的锚点，切图是素材来源）。
+  //    文案与切图层永不剔除（文案是排版关键信息，切图是素材来源）。
   //    数组顺序 = 绘制顺序（后出现更靠上，已实测验证）。LANHU_PRUNE_OCCLUDED=0 可整体关闭。
   let occludedLayerCount = 0;
   if (process.env.LANHU_PRUNE_OCCLUDED !== '0') {
