@@ -77,7 +77,7 @@ const columnMapSchema = z
 // ─── Server ─────────────────────────────────────────────────────
 
 const server = new McpServer(
-  { name: 'shimo-mcp', version: '0.2.0' },
+  { name: 'shimo-mcp', version: '0.3.0' },
   {
     instructions: [
       '石墨表格结构化读取与 i18n 导出工作流：',
