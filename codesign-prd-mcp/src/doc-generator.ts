@@ -10,7 +10,7 @@
  */
 import { flowchartToMermaid, tableToMarkdown } from './vlm.js';
 import type { AxureBlock, AxureFlow } from './axure-dom.js';
-import type { DetailLevel, MergedPage, MergedTable, PageType } from './types.js';
+import type { ContentContainer, DetailLevel, MergedPage, MergedTable, PageType } from './types.js';
 
 /** 页面类型 → 中文名 */
 const TYPE_LABELS: Record<PageType, string> = {
@@ -22,6 +22,9 @@ const TYPE_LABELS: Record<PageType, string> = {
 
 /** 短文案阈值：单行且不超过该长度判定为「界面文案」，否则算「说明/规则」 */
 const SHORT_LABEL_LIMIT = 12;
+
+/** 设计标注类控件：画布上的非正文标注（标记点/辅助线/占位符/便签），单独成节不混入文案 */
+const DESIGN_NOTE_TYPE_RE = /(水滴形|线段|Vertical line|占位符|便签)/i;
 
 export interface GenerateDocParams {
   /** 需求分组名称 */
@@ -51,6 +54,8 @@ interface BlockGroups {
   rulesTotal: number;
   /** 界面文案类（短标签，去重并计数） */
   labels: { type: string; text: string; count: number }[];
+  /** 设计标注类（水滴形/线段/占位符/便签等非正文标注，去重并计数） */
+  designNotes: { type: string; text: string; count: number }[];
 }
 
 /**
@@ -63,9 +68,17 @@ function splitBlocks(blocks?: AxureBlock[]): BlockGroups {
   const ruleSeen = new Map<string, BlockGroups['rules'][number]>();
   let rulesTotal = 0;
   const labelMap = new Map<string, { type: string; count: number }>();
+  const noteMap = new Map<string, { type: string; count: number }>();
 
   for (const b of blocks || []) {
     if (!b.lines.length) continue;
+    if (DESIGN_NOTE_TYPE_RE.test(b.type)) {
+      const text = b.lines.join(' ');
+      const prev = noteMap.get(text);
+      if (prev) prev.count += 1;
+      else noteMap.set(text, { type: b.type, count: 1 });
+      continue;
+    }
     if (b.lines.length === 1 && b.lines[0].length <= SHORT_LABEL_LIMIT) {
       const prev = labelMap.get(b.lines[0]);
       if (prev) prev.count += 1;
@@ -86,6 +99,10 @@ function splitBlocks(blocks?: AxureBlock[]): BlockGroups {
     rules,
     rulesTotal,
     labels: [...labelMap.entries()].map(([text, v]) => ({ text, ...v })),
+    // 纯数字标注（水滴形上的编号点）单独出现没有语义，直接丢弃；有文字的保留
+    designNotes: [...noteMap.entries()]
+      .map(([text, v]) => ({ text, ...v }))
+      .filter((n) => !/^\d+$/.test(n.text.trim())),
   };
 }
 
@@ -105,14 +122,7 @@ function renderImages(page: MergedPage): string {
 /** 去除全部空白，用于重复 / 覆盖判定 */
 const squash = (s: string): string => s.replace(/\s+/g, '');
 
-/**
- * 清理「页面文字」兜底文本流。它是 innerText 式的一维导出，画布页内容多时
- * 与上方表格 / 控件块大面积重复，且混有 `<`、`?` 等纯符号控件占位。三步清理：
- * ① 去纯符号行；② 去整行重复；③ 剔除已被结构化内容覆盖的行。
- * 覆盖语料 = 表格单元格（按 <br>/换行 拆原子）+ 控件块文本行，按原顺序拼接——
- * domText 的整段长行正是一块控件行以空格连接（axure-dom 的导出方式），
- * 去空白后恰好是语料里的连续子串，可被包含判定命中。
- */
+/** 清理「页面文字」兜底流(innerText 式一维导出)。与上方表格/控件块大面积重复且混纯符号占位，三步清理：①去纯符号行 ②去整行重复 ③剔除已被结构化内容覆盖的行。覆盖语料=表格单元格(<br>拆原子)+控件块文本行；domText长行即控件行空格连接，去空白后被包含判定命中 */
 function cleanDomText(page: MergedPage): { lines: string[]; removed: number } {
   const corpusParts: string[] = [];
   for (const t of page.tables || []) {
@@ -160,6 +170,8 @@ function renderDomFallback(page: MergedPage): string {
     return out;
   }
   if (page.domText) {
+    // 画布内容（renderSpatialContent）已按阅读序覆盖正文时，原始文字流只是噪音
+    if (page.blocks?.length) return '';
     const { lines, removed } = cleanDomText(page);
     if (!lines.length) return '';
     const note = removed > 0 ? `；已剔除 ${removed} 行与上方重复/纯符号内容` : '';
@@ -271,42 +283,157 @@ function renderLabelsInline(labels: BlockGroups['labels']): string {
 }
 
 /**
- * 渲染「说明与规则 + 界面文案」两块（结构化 DOM 提取的主产出）。
- * 空间切分过的页面（block.sec 已标注）按界面区块分组：mockup 的示例文案归属到
- * 所属界面，画布散落文字（全局规则/标题）单列一节，不再页面级平铺混作一堆；
- * 未切分页面保持原有的平铺两段式。
+ * 渲染「画布内容」：按空间阅读序组织（从上到下、从左到右）。
+ * 以 y 方向的空隙聚类成内容组（组内即视觉上相邻的一片控件），组内按 y 分行、
+ * 行内按 x 排序，相邻重复行折叠 ×N——模拟人类看原型时的阅读顺序，
+ * 不对内容做语义分类（规则/界面示意/表单面板都在它们的画布位置上，Agent 按序消费）。
  */
-function renderBlocks(page: MergedPage, detailLevel: DetailLevel): string {
+const BAND_GAP_PX = 12;
+
+interface SpatialItem {
+  y: number;
+  bottom: number;
+  x: number;
+  w: number;
+  lines?: string[];
+  panel?: MergedTable;
+}
+
+/** 区域内渲染：行带（y 差 ≤12px 为同一阅读行，行内按 x），面板织入，相邻重复行折叠 ×N */
+function renderRegionItems(items: SpatialItem[], emit: (line: string) => void): void {
+  let lastLine = '';
+  let lastCount = 0;
+  const emitLine = (line: string): void => {
+    if (line === lastLine) { lastCount += 1; return; }
+    if (lastCount > 0) emit(lastLine + (lastCount > 1 ? ` ×${lastCount}` : ''));
+    lastLine = line;
+    lastCount = 1;
+  };
+  let band: { x: number; rowLines: string[]; count: number }[] | null = null;
+  let bandY = -Infinity;
+  const flushBand = (): void => {
+    if (!band || !band.length) { band = null; return; }
+    band.sort((a, b) => a.x - b.x);
+    const rows = Math.max(...band.map((t) => t.rowLines.length));
+    for (let r = 0; r < rows; r++) {
+      const segs = band.map((t) => t.rowLines[r] || '').filter(Boolean);
+      emitLine(segs.length === 1 ? segs[0] : segs.join(' ｜ '));
+    }
+    band = null;
+  };
+
+  items
+    .slice()
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .forEach((it) => {
+      if (it.panel) {
+        flushBand();
+        emitLine(`【表单】${it.panel.rows.map((row) => row.filter(Boolean).join('：')).join(' ｜ ')}`);
+        return;
+      }
+      const rowLines = (it.lines || []).filter(Boolean);
+      if (!rowLines.length) return;
+      if (band && it.y - bandY > BAND_GAP_PX) flushBand();
+      if (!band) { band = []; bandY = it.y; }
+      const key = rowLines.join('|');
+      const dup = band.find((t) => t.rowLines.join('|') === key);
+      if (dup) dup.count += 1;
+      else band.push({ x: it.x, rowLines, count: 1 });
+    });
+  flushBand();
+  if (lastCount > 0) emit(lastLine + (lastCount > 1 ? ` ×${lastCount}` : ''));
+}
+
+function renderSpatialContent(
+  blocks: AxureBlock[],
+  panels: MergedTable[] = [],
+  containers: ContentContainer[] = []
+): string {
+  // 设计标注类型不进阅读序正文（已在「设计标注」节单独输出）
+  const items: SpatialItem[] = [];
+  blocks
+    .filter((b) => b.lines.length && !!b.rect && !DESIGN_NOTE_TYPE_RE.test(b.type))
+    .forEach((b) =>
+      items.push({
+        y: b.rect!.y,
+        bottom: b.rect!.y + b.rect!.h,
+        x: b.rect!.x,
+        w: b.rect!.w,
+        lines: b.lines.filter(Boolean),
+      })
+    );
+  panels
+    .filter((p) => !!p.rect)
+    .forEach((p) =>
+      items.push({
+        y: p.rect!.y,
+        bottom: p.rect!.y + p.rect!.h,
+        x: p.rect!.x,
+        w: p.rect!.w,
+        panel: p,
+      })
+    );
+  if (!items.length) return '';
+
+  // 内容组 = 界面容器（面积升序找「最小包含容器」；完全嵌套的行底板
+  // 已在提取端并入外层）。设计师给每个界面铺的底板（box_1）就是内容区的确定边界；
+  // 容器外的游离元素不再按间距强行聚类，按阅读序平铺到「容器外元素」。
+  const byArea = containers.slice().sort((a, b) => a.w * a.h - b.w * b.h);
+  const containerItems = new Map<ContentContainer, SpatialItem[]>();
+  const free: SpatialItem[] = [];
+  items.forEach((it) => {
+    const cx = it.x + it.w / 2;
+    const cy = (it.y + it.bottom) / 2;
+    const host = byArea.find(
+      (c) => cx >= c.x && cx <= c.x + c.w && cy >= c.y && cy <= c.y + c.h
+    );
+    if (host) {
+      const list = containerItems.get(host) || [];
+      list.push(it);
+      containerItems.set(host, list);
+    } else {
+      free.push(it);
+    }
+  });
+
+  let out = `**画布内容**（界面容器按画布位置分组，元素按阅读序排版）：\n\n`;
+  let groupNo = 0;
+  Array.from(containerItems.entries())
+    .filter(([, list]) => list.length > 0)
+    .sort((a, b) => a[0].y - b[0].y || a[0].x - b[0].x)
+    .forEach(([c, list]) => {
+      groupNo += 1;
+      out += `##### 内容组 ${groupNo}（x ${c.x}~${c.x + c.w}，y ${c.y}~${c.y + c.h}，界面容器）\n\n`;
+      renderRegionItems(list, (line) => { out += `- ${line}\n`; });
+      out += `\n`;
+    });
+
+  if (free.length) {
+    out += `**容器外元素**（按阅读序）：\n\n`;
+    renderRegionItems(free, (line) => { out += `- ${line}\n`; });
+    out += `\n`;
+  }
+  return out;
+}
+
+function renderBlocks(page: MergedPage, _detailLevel: DetailLevel): string {
   const blocks = page.blocks || [];
-  if (!blocks.length) return '';
+  if (!blocks.length && !page.panels?.length) return '';
 
   if (!blocks.some((b) => b.sec !== undefined)) {
-    const { rules, rulesTotal, labels } = splitBlocks(blocks);
-    if (!rules.length && !labels.length) return '';
-
-    let out = '';
-    if (rules.length) {
-      const dupNote = rulesTotal > rules.length ? `，${rulesTotal - rules.length} 条重复已合并` : '';
-      out += `**说明与规则**（${rules.length} 条${dupNote}，DOM 确定性提取）：\n\n`;
-      out += renderRuleList(rules);
-      out += `\n`;
-    }
-
-    if (labels.length) {
-      const limit = detailLevel === 'full' ? Infinity : 60;
-      const shown = labels.slice(0, limit);
-      out += `**界面文案清单**（${labels.length} 个，已去重；\`类型\` 为 Axure 控件类型）：\n\n`;
-      shown.forEach((l) => {
-        out += `- ${l.text}${l.count > 1 ? ` ×${l.count}` : ''} \`${l.type}\`\n`;
+    const { designNotes } = splitBlocks(blocks);
+    const content = renderSpatialContent(blocks, page.panels || [], page.containers || []);
+    if (!content && !designNotes.length) return '';
+    let out = content;
+    if (designNotes.length) {
+      out += `**设计标注**（画布上的标记点/辅助线/便签等非正文标注，${designNotes.length} 个，已去重）：\n\n`;
+      designNotes.forEach((n) => {
+        out += `- ${n.text}${n.count > 1 ? ` ×${n.count}` : ''} \`${n.type}\`\n`;
       });
-      if (shown.length < labels.length) {
-        out += `- …（其余 ${labels.length - shown.length} 个，用 detailLevel:full 查看全部）\n`;
-      }
       out += `\n`;
     }
     return out;
   }
-
   // ── 按界面区块分组 ──────────────────────────────────────────
   const groups = new Map<number, AxureBlock[]>();
   blocks.forEach((b) => {
@@ -343,13 +470,20 @@ function renderBlocks(page: MergedPage, detailLevel: DetailLevel): string {
       out += `\n`;
     }
   }
+
+  // 设计标注统一收尾展示：分区块路径里各段的标注块也不进正文文案
+  const { designNotes } = splitBlocks(blocks);
+  if (designNotes.length) {
+    out += `**设计标注**（画布上的标记点/辅助线/便签等非正文标注，${designNotes.length} 个，已去重）：\n\n`;
+    designNotes.forEach((n) => {
+      out += `- ${n.text}${n.count > 1 ? ` ×${n.count}` : ''} \`${n.type}\`\n`;
+    });
+    out += `\n`;
+  }
   return out;
 }
 
-/**
- * 渲染内嵌图定向解析结果——图内文字是 DOM 完全提取不到的部分，
- * 因此单独成节并标注来源；纯占位数据的图不展开文字，避免噪音。
- */
+/** 渲染内嵌图定向解析结果——图内文字是 DOM 提取不到的部分，单独成节并标来源；纯占位数据的图不展开文字，避免噪音 */
 function renderImageAnalysis(page: MergedPage): string {
   const all = page.imageAnalysis || [];
   const items = all.filter((a) => !a.error && (a.texts.length > 0 || a.summary));
@@ -585,10 +719,11 @@ function generatePageSection(
   section += renderHeader(page);
   section += renderImages(page);
 
-  if (page.tables?.length) section += renderTables(page.tables);
+  // 画布内容（空间阅读序）优先，表格类内容统一放到最后
   section += renderBlocks(page, detailLevel);
   section += renderImageAnalysis(page);
   section += renderVlmExtras(page, detailLevel);
+  if (page.tables?.length) section += renderTables(page.tables);
 
   // 空间区块 / 纯文字兜底：VLM 没覆盖时用 DOM 结构化结果顶上
   if (!page._hasVLM) section += renderDomFallback(page);
@@ -605,6 +740,19 @@ function generateTableSection(page: MergedPage, index: number | null): string {
   section += renderHeader(page);
   section += renderImages(page);
 
+  // 画布内容（空间阅读序）优先，表格类内容统一放到最后
+  section += renderBlocks(page, 'standard');
+
+  if (page.vlmResult?.other_data?.length) {
+    section += `**其他重要信息**（VLM）：\n\n`;
+    page.vlmResult.other_data.forEach((d) => { section += `- ${d}\n`; });
+    section += `\n`;
+  }
+
+  // 内嵌图文字对配置表页尤其关键：表格型设计稿常整张为位图，DOM 拿不到，
+  // auto 档跳过分段解析后这里是该页位图内容的唯一文字来源
+  section += renderImageAnalysis(page);
+
   if (page.tables?.length) {
     const filled = page.tables.filter((t) => !isHeaderOnlyTable(t));
     const empty = page.tables.filter(isHeaderOnlyTable);
@@ -615,18 +763,7 @@ function generateTableSection(page: MergedPage, index: number | null): string {
     }
   }
 
-  if (page.vlmResult?.other_data?.length) {
-    section += `**其他重要信息**（VLM）：\n\n`;
-    page.vlmResult.other_data.forEach((d) => { section += `- ${d}\n`; });
-    section += `\n`;
-  }
-
-  // 配置表页也常有规则说明，来自 DOM 结构化提取
-  section += renderBlocks(page, 'standard');
-  // 内嵌图文字对配置表页尤其关键：表格型设计稿常整张为位图，DOM 拿不到，
-  // auto 档跳过分段解析后这里是该页位图内容的唯一文字来源
-  section += renderImageAnalysis(page);
-  if (!page._hasVLM && page.domText) {
+  if (!page._hasVLM && page.domText && !page.blocks?.length) {
     const { lines } = cleanDomText(page);
     if (lines.length) {
       section += `**页面文字**（未视觉解析，已去重去噪）：\n\n${lines.slice(0, 5).join('\n')}\n\n`;

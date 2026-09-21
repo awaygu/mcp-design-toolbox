@@ -76,12 +76,22 @@ export interface VisualState {
   condition?: string;
 }
 
+/** 界面容器锚点：大面积无文字矩形（设计师铺的屏幕/面板底板，如 box_1 类控件） */
+export interface ContentContainer {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** DOM 提取的表格 */
 export interface DomTable {
   headers: string[];
   rows: string[][];
   /** 表格边界矩形（.table_cell 的 viewbox 画布坐标聚合），用于标题推断与空间定位；真 <table> 兜底提取时缺省 */
   rect?: { x: number; y: number; w: number; h: number } | null;
+  /** 弹窗/表单面板表（字段|内容）：内容若已被画布阅读序覆盖则整表跳过 */
+  _panel?: boolean;
 }
 
 import type { AxureBlock, AxureFlow } from './axure-dom.js';
@@ -97,6 +107,10 @@ export interface ExtractedContent {
   blocks?: AxureBlock[];
   /** 连接线几何还原的流程图拓扑，非流程图页为 null */
   flow?: AxureFlow | null;
+  /** 界面容器锚点（大面积无文字矩形，如屏幕底板 box_1）：渲染时按包含关系分组 */
+  containers?: ContentContainer[];
+  /** 页面控件总数（.ax_default）：0 = 空页面，pipeline 据此跳过 VLM */
+  widgetCount?: number;
 }
 
 /** 画布空间切分出的区块（通常对应一个界面/弹窗） */
@@ -136,6 +150,10 @@ export interface CrawledPage extends ScreenshotResult {
   flow?: AxureFlow | null;
   /** 内容图定向截图（已过滤连接线段与图标），供内嵌图单独解析 */
   imageShots?: PageImage[];
+  /** 界面容器锚点（大面积无文字矩形） */
+  containers?: ContentContainer[];
+  /** 页面控件总数（.ax_default）：0 = 空页面，pipeline 据此跳过 VLM */
+  widgetCount?: number;
   /** 导航失败等原因写入，pipeline 会据此直接产出失败结果 */
   error?: string;
 }
@@ -237,10 +255,7 @@ export interface VlmMeta {
   _edgeCount?: number;
 }
 
-/**
- * VLM 单段解析结果。三类 Prompt 产出的字段做成了联合——
- * 具体字段是否存在取决于 type，使用处按类型分支访问。
- */
+/** VLM 单段解析结果。三类 Prompt 字段做成联合，存在与否取决于 type，使用处按类型分支访问 */
 /** 内嵌图定向解析结果（type='image'）：只提取 DOM 拿不到的图内文字 */
 export interface VlmImageContent {
   /** 这张图是什么（如「App 界面截图」「活动规则海报」） */
@@ -304,11 +319,15 @@ export interface MergedPage {
   type: PageType;
   domText: string;
   tables: MergedTable[];
+  /** 弹窗/表单面板表（字段|内容）：界面元素，doc 端按画布位置织入阅读序 */
+  panels?: MergedTable[];
   images: PageImage[];
   /** 画布型页面的空间切分区块（经管线透传） */
   sections?: PageSection[];
   /** 结构化控件块（DOM 确定性提取） */
   blocks?: AxureBlock[];
+  /** 界面容器锚点（大面积无文字矩形）：画布内容按包含关系分组 */
+  containers?: ContentContainer[];
   /** 连接线几何还原的流程图（DOM 确定性提取） */
   flow?: AxureFlow | null;
   /** 内嵌图定向解析结果（图内文字，DOM 提取不到） */
@@ -327,6 +346,8 @@ export interface MergePageInput {
   images?: PageImage[];
   sections?: PageSection[];
   blocks?: AxureBlock[];
+  /** 界面容器锚点（大面积无文字矩形） */
+  containers?: ContentContainer[];
   flow?: AxureFlow | null;
   /** 内嵌图定向解析结果（图内文字） */
   imageAnalysis?: ImageAnalysis[];

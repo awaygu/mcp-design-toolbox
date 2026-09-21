@@ -70,9 +70,9 @@ async function main(): Promise<void> {
   const groupItem = outline.find((i) => i.name.includes(GROUP_NAME));
   console.log(`      目标分组: ${groupItem?.name}`);
 
-  // 3. 爬取分组页面（含分段截图）
-  console.log('[3/5] 爬取分组页面（分段截图）...');
-  const pagesData = await getGroupPages(GROUP_NAME, SHARE_URL);
+  // 3. 爬取分组页面（启用 VLM 时才截图，截图只为视觉解析服务）
+  console.log(`[3/5] 爬取分组页面（${vlmOn ? '分段截图' : '纯 DOM，跳过截图'}）...`);
+  const pagesData = await getGroupPages(GROUP_NAME, SHARE_URL, { screenshots: vlmOn });
   console.log(`      共 ${pagesData.length} 个页面`);
   pagesData.forEach((p) => {
     const segInfo = p.isSegmented ? `, ${p.segmentCount}段截图` : ', 单张截图';
@@ -82,6 +82,7 @@ async function main(): Promise<void> {
   // 4. VLM 解析 + 合并（跨页全局并发）
   console.log('[4/5] VLM 解析 + 结果合并...');
   const mergedPages = await processPages(pagesData, SHARE_URL, {
+    vlmEnabled: vlmOn,
     onPageDone: (pageName, { cached, segments, vlmSkipped }) => {
       const tag = vlmSkipped ? '[跳过VLM·仅DOM]' : cached ? '[缓存命中]' : '[VLM解析]';
       console.log(`      ${tag} ${pageName} (${segments}段)`);

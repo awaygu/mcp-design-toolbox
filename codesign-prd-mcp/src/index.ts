@@ -112,7 +112,7 @@ const server = new McpServer(
       '   - 超时/中断后可用 pageNames 只重跑指定页：已完成的页有缓存（DOM 未变跳过截图、VLM 结果按内容缓存），重跑秒回。',
       '3. get_page_content 读取单页结构化内容（单页补充细节时用）。',
       '4. VLM 只用于 DOM 提取不到的内容：内嵌图（图内文字）始终单独定向解析；整页分段仅对 DOM 提取不到内容的页面运行（纯图片页、拓扑还原失败的流程图）。表格/规则文字/流程拓扑由 DOM 确定性提取，无需视觉模型。',
-      '5. 未配置 VLM_API_KEY 时自动降级为纯 DOM 文字提取（流程图/表格解析不可用，其余正常）。',
+      '5. 未配置 VLM_API_KEY 或传 vlmEnabled:false 时自动降级为纯 DOM 文字提取（流程图/表格解析不可用，其余正常），并跳过截图——截图只为视觉解析服务，纯 DOM 模式不需要，爬取更快。',
       '6. url/password 可用环境变量 CODESIGN_URL / CODESIGN_PASSWORD 预置，调用时无需重复传。',
     ].join('\n'),
   }
@@ -164,14 +164,17 @@ server.registerTool(
   'get_page_content',
   {
     description:
-      '获取 CoDesign 原型中单个页面的结构化内容（VLM 解析后纯文本，含组件/交互/表格）。页面同名时传完整路径「父分组/页面名」',
+      '获取 CoDesign 原型中单个页面的结构化内容（启用 VLM 为视觉解析后纯文本，含组件/交互/表格；未启用则纯 DOM 提取、不截图）。页面同名时传完整路径「父分组/页面名」',
     inputSchema: {
       url: z.string().optional().describe('CoDesign 分享链接；不传时使用环境变量 CODESIGN_URL'),
       password: z.string().optional().describe('访问密码；不传时使用环境变量 CODESIGN_PASSWORD'),
       pageName: z
         .string()
         .describe('页面名称（叶子名或完整路径「父分组/页面名」，同名页面须用路径区分）'),
-      vlmEnabled: z.boolean().optional().describe('是否启用 VLM 解析，默认 true'),
+      vlmEnabled: z
+        .boolean()
+        .optional()
+        .describe('是否启用 VLM 解析，默认 true；false 时纯 DOM 提取且不截图'),
       detailLevel: z
         .enum(['summary', 'standard', 'full'])
         .optional()
@@ -185,17 +188,27 @@ server.registerTool(
     const notify = createProgressNotifier(extra);
     try {
       const access = resolveAccess(url, password);
+      // 截图只为 VLM 服务：未启用视觉模型时整条截图链路都不跑（纯 DOM 模式更快）
+      const useVlm = vlmEnabled && isVLMConfigured();
       // 爬取需要独占浏览器；VLM 只依赖已落盘的截图，放在锁外避免长时间占用
       const pageData = await withBrowserLock(async () => {
         await withHeartbeat(notify, () => ensureOpened(access.url, access.password), { stage: '打开原型' });
-        return await withHeartbeat(notify, () => getSinglePage(pageName, access.url), { stage: `定位页面「${pageName}」` });
+        return await withHeartbeat(
+          notify,
+          () => getSinglePage(pageName, access.url, { screenshots: useVlm }),
+          { stage: `定位页面「${pageName}」` }
+        );
       });
-      notify(`页面截图完成（${pageData.segments?.length || 0} 段），开始解析…`);
+      if (useVlm) {
+        notify(`页面截图完成（${pageData.segments?.length || 0} 段），开始解析…`);
+      } else {
+        notify('未启用 VLM（未配置 VLM_API_KEY 或 vlmEnabled=false），已跳过截图，仅 DOM 提取');
+      }
       const merged = await withHeartbeat(
         notify,
         () =>
           processPage(pageData, access.url, {
-            vlmEnabled,
+            vlmEnabled: useVlm,
             // 页面名作为业务背景注入 VLM prompt（仅供语义参考）
             context: `页面名称：${pageName}`,
             onProgress: (m) => notify(m),
@@ -217,14 +230,17 @@ server.registerTool(
   'get_requirement_doc',
   {
     description:
-      '【核心】获取 CoDesign 原型中指定需求分组的完整结构化需求文档。自动遍历所有页面，分段截图 + VLM 解析，输出纯文本 PRD（无截图路径），AI Coding Agent 可直接使用',
+      '【核心】获取 CoDesign 原型中指定需求分组的完整结构化需求文档。自动遍历所有页面（启用 VLM 时分段截图 + 视觉解析，未启用则纯 DOM 提取、不截图），输出纯文本 PRD（无截图路径），AI Coding Agent 可直接使用',
     inputSchema: {
       url: z.string().optional().describe('CoDesign 分享链接；不传时使用环境变量 CODESIGN_URL'),
       password: z.string().optional().describe('访问密码；不传时使用环境变量 CODESIGN_PASSWORD'),
       groupName: z
         .string()
         .describe('需求分组名称（如 "新手引导"）；同名歧义时用完整路径。分组名不确定时可直接调用，失败会返回候选列表'),
-      vlmEnabled: z.boolean().optional().describe('是否启用 VLM 解析，默认 true'),
+      vlmEnabled: z
+        .boolean()
+        .optional()
+        .describe('是否启用 VLM 解析，默认 true；false 时纯 DOM 提取且不截图'),
       detailLevel: z
         .enum(['summary', 'standard', 'full'])
         .optional()
@@ -246,22 +262,28 @@ server.registerTool(
     try {
       const access = resolveAccess(url, password);
       const notify = createProgressNotifier(extra);
+      // 截图只为 VLM 服务：未启用视觉模型时不截图，纯 DOM 爬取明显更快
+      const useVlm = vlmEnabled && isVLMConfigured();
 
       // 爬取阶段独占浏览器（单页顺序导航无法并行）
       const pagesData = await withBrowserLock(async () => {
         await withHeartbeat(notify, () => ensureOpened(access.url, access.password), { stage: '打开原型' });
         return await getGroupPages(groupName, access.url, {
           pageNames,
+          screenshots: useVlm,
           onProgress: (m) => notify(m),
         });
       });
+      if (!useVlm) {
+        notify('未启用 VLM（未配置 VLM_API_KEY 或 vlmEnabled=false），已跳过截图，仅 DOM 提取');
+      }
 
       // VLM 阶段不碰浏览器，放在锁外；所有页面的分段统一走一次全局并发
       const mergedPages = await withHeartbeat(
         notify,
         () =>
           processPages(pagesData, access.url, {
-            vlmEnabled,
+            vlmEnabled: useVlm,
             onProgress: (m) => notify(m),
             // 需求分组/页面名作为业务背景注入 VLM prompt（仅供语义参考，见 contextHint 的防锚定声明）
             contextFor: (page) => `需求分组：${groupName}；页面：${page.pageName}`,
@@ -287,8 +309,7 @@ server.registerTool(
         const filePath = path.join(outDir, `${safeGroupName(groupName)}_需求文档.md`);
         writeFileSync(filePath, doc, 'utf-8');
 
-        // 机器可读的结构化数据（表格/流程/控件块/来源），供 Agent 直接消费或做二次处理，
-        // 不必再反解 Markdown。Markdown 面向人读，JSON 面向程序读。
+        // 机器可读结构化数据(表格/流程/控件块/来源)，供 Agent 直消费或二次处理，不必反解 Markdown；Markdown 面向人、JSON 面向程序
         const jsonPath = path.join(outDir, `${safeGroupName(groupName)}_结构化数据.json`);
         writeFileSync(
           jsonPath,

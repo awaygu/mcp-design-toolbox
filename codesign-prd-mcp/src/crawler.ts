@@ -343,11 +343,7 @@ export async function extractPageText(): Promise<ExtractedContent> {
   return (await frame.evaluate(axureExtractExpression())) as ExtractedContent;
 }
 
-/**
- * 采集当前页面「内容图」的定向截图（内嵌原型图/设计稿），供视觉模型单独解析。
- * 已过滤连接线段与图标级小图（判定见 axure-dom 的 isContent）。
- * 截图失败不抛错——它只是增强项，不该阻断主流程。
- */
+/** 采集当前页「内容图」定向截图(内嵌原型图/设计稿)，供 VLM 单独解析；已过滤连接线段与图标小图(见 axure-dom isContent)；失败不抛，仅增强项 */
 export async function capturePageContentImages(
   pageName: string,
   images: PageImage[]
@@ -358,6 +354,11 @@ export async function capturePageContentImages(
   } catch {
     return [];
   }
+}
+
+/** 跳过截图时的占位结果：segments 为空，消费方（pipeline / 文档）按「无截图」处理 */
+function skippedScreenshot(): ScreenshotResult {
+  return { segments: [], totalHeight: 0, segmentCount: 0, isSegmented: false };
 }
 
 /**
@@ -376,11 +377,7 @@ export async function screenshotPage(
   return await capturePageSegments(filename, frame, pageCacheKey ?? undefined);
 }
 
-/**
- * 页面级缓存键：分享链接 + 页面名 + DOM 文字哈希 + 截图方案版本。
- * Axure 为静态导出，文字不变即可认为页面未变，可复用已有截图；
- * 截图分段逻辑变化时递增 CAPTURE_SCHEME_VERSION，旧缓存（旧分段清单）自动失效。
- */
+/** 页面级缓存键：url+页名+DOM文字哈希+截图方案版本。Axure 静态导出，文字不变即可复用截图；分段逻辑变时递增 CAPTURE_SCHEME_VERSION 使旧缓存失效 */
 const CAPTURE_SCHEME_VERSION = 'v2';
 
 function pageCacheKeyOf(
@@ -415,12 +412,19 @@ function resolveGroup(
  * @param url - 分享链接，用于页面级缓存键
  * @param opts.pageNames - 只处理指定页面（叶子名或完整路径），未命中的名字返回合成错误页
  * @param opts.onProgress - 逐页进度回调（MCP 层转发为 progress 通知）
+ * @param opts.screenshots - 是否截图（默认 true）。截图只为视觉模型服务，
+ *   未启用 VLM 时传 false 可跳过全部分段截图与内嵌图定向截图，爬取更快
  */
 export async function getGroupPages(
   groupName: string,
   url?: string,
-  opts?: { pageNames?: string[]; onProgress?: (message: string) => void }
+  opts?: {
+    pageNames?: string[];
+    onProgress?: (message: string) => void;
+    screenshots?: boolean;
+  }
 ): Promise<CrawledPage[]> {
+  const screenshots = opts?.screenshots !== false;
   const outline = await getPageOutline();
   const located = resolveGroup(outline, groupName);
   if (!located.ok) throw new Error(located.reason);
@@ -434,15 +438,14 @@ export async function getGroupPages(
     const before = await extractPageText();
     const selfNav = await navigateToPageByIndex(target.domIndex, { quick: true });
     if (selfNav.ok) {
-      const { text, tables, images, sections, blocks, flow } = await extractPageText();
+      const { text, tables, images, sections, blocks, flow, widgetCount, containers } = await extractPageText();
       // URL 未切换但文字变化也算切换（防同 URL 重渲染），空白页（无文字无图）不计入
       const switched = selfNav.frameChanged || text !== before.text;
       if (switched && (text.trim() || images.length > 0)) {
-        const screenshotResult = await screenshotPage(
-          `${groupName}_分组页`,
-          pageCacheKeyOf(url, target.path, text)
-        );
-        const imageShots = await capturePageContentImages(target.name, images);
+        const shot = screenshots
+          ? await screenshotPage(`${groupName}_分组页`, pageCacheKeyOf(url, target.path, text))
+          : skippedScreenshot();
+        const imageShots = screenshots ? await capturePageContentImages(target.name, images) : [];
         results.push({
           pageName: target.name,
           text,
@@ -452,10 +455,12 @@ export async function getGroupPages(
           sections,
           blocks,
           flow,
-          segments: screenshotResult.segments,
-          segmentCount: screenshotResult.segmentCount,
-          isSegmented: screenshotResult.isSegmented,
-          totalHeight: screenshotResult.totalHeight,
+          widgetCount,
+          containers,
+          segments: shot.segments,
+          segmentCount: shot.segmentCount,
+          isSegmented: shot.isSegmented,
+          totalHeight: shot.totalHeight,
         });
       }
     }
@@ -514,13 +519,12 @@ export async function getGroupPages(
       continue;
     }
 
-    const { text, tables, images, sections, blocks, flow } = await extractPageText();
-    const screenshotResult = await screenshotPage(
-      `${groupName}_${pageInfo.name}`,
-      pageCacheKeyOf(url, pageInfo.name, text)
-    );
+    const { text, tables, images, sections, blocks, flow, widgetCount, containers } = await extractPageText();
+    const shot = screenshots
+      ? await screenshotPage(`${groupName}_${pageInfo.name}`, pageCacheKeyOf(url, pageInfo.name, text))
+      : skippedScreenshot();
 
-    const imageShots = await capturePageContentImages(pageInfo.name, images);
+    const imageShots = screenshots ? await capturePageContentImages(pageInfo.name, images) : [];
     results.push({
       pageName: pageInfo.name,
       text,
@@ -530,10 +534,12 @@ export async function getGroupPages(
       sections,
       blocks,
       flow,
-      segments: screenshotResult.segments,
-      segmentCount: screenshotResult.segmentCount,
-      isSegmented: screenshotResult.isSegmented,
-      totalHeight: screenshotResult.totalHeight,
+      widgetCount,
+      containers,
+      segments: shot.segments,
+      segmentCount: shot.segmentCount,
+      isSegmented: shot.isSegmented,
+      totalHeight: shot.totalHeight,
     });
   }
 
@@ -555,12 +561,13 @@ export async function getGroupPages(
   return results;
 }
 
-/**
- * 获取单个页面的完整内容
- * @param pageName - 页面叶子名或完整路径（父分组/页面名，用于同名页面消歧）
- * @param url - 分享链接，用于页面级缓存键
- */
-export async function getSinglePage(pageName: string, url?: string): Promise<CrawledPage> {
+/** 获取单页完整内容；@param pageName 叶子名或完整路径(同名消歧) @param url 分享链接 @param opts.screenshots 是否截图(默认true；未启用VLM传false跳过) */
+export async function getSinglePage(
+  pageName: string,
+  url?: string,
+  opts?: { screenshots?: boolean }
+): Promise<CrawledPage> {
+  const screenshots = opts?.screenshots !== false;
   const outline = await getPageOutline();
   const located = matchTreeTarget(outline, pageName, 'any');
   if (!located.ok) throw new Error(located.reason);
@@ -568,13 +575,12 @@ export async function getSinglePage(pageName: string, url?: string): Promise<Cra
   const nav = await navigateToPageByIndex(located.target.domIndex);
   if (!nav.ok) throw new Error(describeNavigationFailure(nav));
 
-  const { text, tables, images, sections, blocks, flow } = await extractPageText();
-  const screenshotResult = await screenshotPage(
-    pageName,
-    pageCacheKeyOf(url, located.target.path, text)
-  );
+  const { text, tables, images, sections, blocks, flow, widgetCount, containers } = await extractPageText();
+  const shot = screenshots
+    ? await screenshotPage(pageName, pageCacheKeyOf(url, located.target.path, text))
+    : skippedScreenshot();
 
-  const imageShots = await capturePageContentImages(pageName, images);
+  const imageShots = screenshots ? await capturePageContentImages(pageName, images) : [];
   return {
     pageName,
     text,
@@ -584,9 +590,11 @@ export async function getSinglePage(pageName: string, url?: string): Promise<Cra
     sections,
     blocks,
     flow,
-    segments: screenshotResult.segments,
-    segmentCount: screenshotResult.segmentCount,
-    isSegmented: screenshotResult.isSegmented,
-    totalHeight: screenshotResult.totalHeight,
+    widgetCount,
+    containers,
+    segments: shot.segments,
+    segmentCount: shot.segmentCount,
+    isSegmented: shot.isSegmented,
+    totalHeight: shot.totalHeight,
   };
 }

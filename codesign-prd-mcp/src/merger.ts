@@ -1,12 +1,4 @@
-/**
- * 结果合并模块
- * 负责将多段 VLM 解析结果 + DOM 文字提取结果，合并成完整的页面结构化数据
- *
- * 合并策略：
- * - 流程图：节点去重、连线补全、分支合并
- * - 表格：表格匹配、行去重、截断行补全
- * - 普通页面：组件去重、交互合并、布局拼接
- */
+/** 结果合并：多段 VLM 解析 + DOM 文字 → 完整页面结构化数据。流程去重补全、表格匹配去重、组件交互去重合并 */
 import type { AxureBlock } from './axure-dom.js';
 import type {
   FlowBranch,
@@ -649,6 +641,7 @@ export function mergePageResult({
   imageAnalysis,
   sections,
   blocks,
+  containers = [],
   flow = null,
   vlmSegments = [],
   type,
@@ -738,11 +731,18 @@ export function mergePageResult({
   // DOM 表格标题推断：用表格旁边的标注文本块补全语义标题（VLM 表格已带 title，不覆盖）
   inferTableTitles(finalTables, blocks);
 
+  // 面板表（字段|内容）与真实数据表分列：面板是界面元素，doc 端把它们按
+  // 画布位置织入阅读序；真实数据表统一排在文档最后
+  const panelTables = finalTables.filter((t) => t._panel);
+  const dataTables = finalTables.filter((t) => !t._panel);
+
   return {
     pageName,
     type,
     domText,
-    tables: finalTables,
+    tables: dataTables,
+    panels: panelTables,
+    containers,
     images,
     sections,
     blocks,

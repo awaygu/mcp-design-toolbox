@@ -1,15 +1,6 @@
 /**
- * Axure 原型结构化 DOM 提取
- *
- * 这一整个函数是「在浏览器 iframe 上下文里执行」的：Playwright 通过 fn.toString()
- * 把它序列化后注入页面，因此**函数体必须完全自包含**——不能引用模块作用域的
- * 任何变量、常量或工具函数（连打包后的外部名也拿不到）。
- *
- * ⚠️ 关键约束：内部所有 helper 必须写成 `function` 声明，不能写成
- * `const foo = () => {}`。esbuild/tsx 在 keepNames 模式下会给箭头函数赋值
- * 套一层 `__name(foo, "foo")` 来保留函数名，而 `__name` 定义在模块作用域、
- * 不会随函数体一起序列化，注入页面后会直接抛 `__name is not defined`。
- * 函数声明自带 name，不需要这层包装，因此能安全序列化。
+ * Axure 结构化 DOM 提取：本函数经 fn.toString() 序列化注入 iframe 执行，必须完全自包含（不引用模块作用域）。
+ * ⚠️ 内部 helper 只能写 function 声明：箭头函数在 keepNames 下被套 `__name(foo)` 包装，而 __name 定义在模块作用域、不随函数体序列化，注入后必抛 __name is not defined。
  *
  * 相比旧的 container.innerText（把表头/单元格/按钮文案压成一维文本流），
  * 这里利用 Axure 导出 HTML 自带的确定性语义：
@@ -19,7 +10,7 @@
  *   ④ `.text` 带 display:none                     → 空占位，跳过而非输出空行
  *   ⑤ 连接线 `_segN` 线段几何                     → 确定性还原流程图拓扑
  */
-import type { DomTable, PageImage, PageSection } from './types.js';
+import type { ContentContainer, DomTable, PageImage, PageSection } from './types.js';
 
 /** 一个带语义的文本/图形控件 */
 export interface AxureBlock {
@@ -35,6 +26,8 @@ export interface AxureBlock {
   imgs: number;
   /** 控件矩形；无坐标信息时为 null */
   rect: { x: number; y: number; w: number; h: number } | null;
+  /** 文字颜色（computed style，如 rgb(255, 0, 0)）：供标注与内容的同色匹配 */
+  color?: string;
   /** 画布空间归属：≥0 = 第 N 个界面区块（y/x 阅读序，对应 sections 下标）；-1 = 画布散落文字（不邻近任何界面截图）。未做空间切分的页面缺省 */
   sec?: number;
 }
@@ -75,6 +68,10 @@ export interface AxureExtract {
   blocks: AxureBlock[];
   /** 连接线几何还原的流程图，非流程图页为 null */
   flow: AxureFlow | null;
+  /** 页面控件总数（.ax_default）：0 = 空页面，pipeline 据此跳过 VLM 避免对白图幻觉 */
+  widgetCount: number;
+  /** 界面容器锚点（大面积无文字矩形），供渲染端按包含关系分组 */
+  containers: ContentContainer[];
 }
 
 /**
@@ -99,7 +96,7 @@ export function axureExtract(): AxureExtract {
 
   const container = document.getElementById('base') || document.body;
   if (!container) {
-    return { text: '', tables: [], images: [], blocks: [], flow: null };
+    return { text: '', tables: [], images: [], blocks: [], flow: null, widgetCount: 0, containers: [] };
   }
 
   // ─── helpers（全部用 function 声明，避免 __name 包装）────────
@@ -170,8 +167,7 @@ export function axureExtract(): AxureExtract {
     const height = Math.round(r.height);
     if (width < 40 || height < 40) return;
     const src = (img.currentSrc || img.src || '').slice(0, 200);
-    // Axure 的连接线由 *_segN.svg 逐段拼出，不是内容图；
-    // 图标级小图（<120px）通常是装饰，都不值得单独送视觉模型解析
+    // 连接线 *_segN.svg 非内容图；图标级小图(<120px)多为装饰，不送 VLM
     const isSegment = /_seg\d+\.svg(\?|$)/i.test(src);
     images.push({
       src,
@@ -188,6 +184,144 @@ export function axureExtract(): AxureExtract {
 
   const allWidgets = Array.from(container.querySelectorAll('.ax_default'));
 
+  // 单元格类名存在导出变体：table_cell / table_cell1（实测竞猜活动页两种并存），
+  // 精确类匹配会整表漏提；统一按「类名包含 table_cell」判断
+  const CELL_SEL = '[class*="table_cell"]';
+  const CELL_CHILD_SEL = ':scope > ' + CELL_SEL;
+  const isCellEl = function (el: Element): boolean {
+    return el.matches(CELL_SEL);
+  };
+  // 注释兜底：导出注释由 Axure 核心逻辑生成，比 class 更稳（实测裸控件注释
+  // 仍是 Table cell）。类名匹配不到时以前导注释的类型为准。
+  const isCellComment = function (el: Element): boolean {
+    return /table\s*cell/i.test((metaOf(el)?.type || '').trim());
+  };
+  const isCell = function (el: Element): boolean {
+    return isCellEl(el) || isCellComment(el);
+  };
+  const cellChildrenOf = function (w: Element): Element[] {
+    return Array.from(w.children).filter((el) => isCell(el));
+  };
+  const tableWidgets = allWidgets.filter((w) => cellChildrenOf(w).length >= 4);
+
+  // 界面容器锚点：大面积无文字矩形（设计师铺的屏幕/面板底板，类名常见 box_1）。
+  // 门槛 150×120：真实底板在 486×987 量级，该尺寸以上多为界面/弹窗底板，
+  // 以下多为按钮底、色块等装饰；渲染端按「中心点落入最小包含容器」给文字/面板分组
+  const containers: ContentContainer[] = [];
+  allWidgets.forEach((w) => {
+    if (textLines(w)) return;
+    if (isCell(w) || tableWidgets.includes(w)) return;
+    const r = rectOf(w);
+    if (!r || r.w < 150 || r.h < 120) return;
+    containers.push({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) });
+  });
+
+  // 完全嵌套于更大容器内部的矩形（榜单行底板等列表条）不独立成组：
+  // 从锚点清单剔除后，其内容的中心点仍落在外层容器，自然并入大组
+  const outerContainers = containers.filter((c) => {
+    return !containers.some(
+      (p) =>
+        p !== c &&
+        p.w * p.h > c.w * c.h &&
+        c.x >= p.x - 2 &&
+        c.y >= p.y - 2 &&
+        c.x + c.w <= p.x + p.w + 2 &&
+        c.y + c.h <= p.y + p.h + 2
+    );
+  });
+
+  // ─── 2a. 弹窗/表单面板：输入框列 + 标签 → 「字段|内容」表格 ──────
+  // 新增/修改类弹窗由散装矩形控件拼成（无 table_cell、常无容器），整块只会
+  // 沉进界面文案清单。以「≥4 个左缘对齐的无文字输入框」为锚点圈出面板，
+  // 按 y 聚行后输出为两列表格；成员不再进入悬浮合并与文案清单。
+  const panelMembers = new Set<Element>();
+  const claimed = new Set<Element>();
+  const panelTables: DomTable[] = [];
+  const isTableRelated = function (el: Element): boolean {
+    return isCell(el) || !!el.querySelector(CELL_SEL);
+  };
+  const looseWidgets = allWidgets.filter(
+    (el) => !isTableRelated(el) && !tableWidgets.some((t) => t.contains(el) || el.contains(t))
+  );
+  // 面板成员按 y 聚行（行内按 x 排序）；一行第一条是字段名，其余并入「内容」
+  const clusterPanelRows = function (members: Element[]): string[][] {
+    const items: { r: { x: number; y: number }; line: string }[] = [];
+    members.forEach((el) => {
+      const r = rectOf(el);
+      const lines = textLines(el);
+      if (!r || !lines) return; // 矩形退化（0×0 且无 svg 兜底）的控件进不了面板
+      items.push({ r: { x: r.x, y: r.y }, line: lines.join('<br>') });
+    });
+    items.sort((a, b) => a.r.y - b.r.y || a.r.x - b.r.x);
+    const rows: string[][] = [];
+    let rowY = -1e9;
+    items.forEach((it) => {
+      if (it.r.y - rowY > 14) { rows.push([]); rowY = it.r.y; }
+      const row = rows[rows.length - 1];
+      if (row.length === 0) { row.push(it.line); } else { row[1] = row[1] ? row[1] + ' / ' + it.line : it.line; }
+    });
+    return rows;
+  };
+  // 「组合」容器：结构化面板边界，优先于几何锚点（容器注释由导出器声明）
+  looseWidgets
+    .filter((el) => /组合/.test((metaOf(el)?.type || '').trim()) && !claimed.has(el))
+    .forEach((g) => {
+      const members = looseWidgets.filter(
+        (el) => el !== g && !claimed.has(el) && g.contains(el) && !!textLines(el)
+      );
+      if (members.length < 4) return;
+      const rows = clusterPanelRows(members);
+      if (rows.length < 4) return;
+      members.forEach((el) => { claimed.add(el); panelMembers.add(el); });
+      claimed.add(g);
+      panelMembers.add(g);
+      const gr = rectOf(g);
+      panelTables.push({
+        headers: ['字段', '内容'],
+        rows,
+        rect: gr ? { x: Math.round(gr.x), y: Math.round(gr.y), w: Math.round(gr.w), h: Math.round(gr.h) } : undefined,
+        _panel: true,
+      });
+    });
+  const inputBoxes = looseWidgets
+    .filter((el) => {
+      if (textLines(el)) return false;
+      const r = rectOf(el);
+      return !!r && r.w >= 60 && r.w <= 200 && r.h >= 14 && r.h <= 80;
+    })
+    .sort((a, b) => rectOf(a)!.x - rectOf(b)!.x);
+  for (let i = 0; i < inputBoxes.length; i++) {
+    if (i > 0 && rectOf(inputBoxes[i])!.x - rectOf(inputBoxes[i - 1])!.x <= 6) continue;
+    const colX = rectOf(inputBoxes[i])!.x;
+    const column = inputBoxes.filter((el) => Math.abs(rectOf(el)!.x - colX) <= 6);
+    if (column.length < 4) continue;
+    const rs = column.map((el) => rectOf(el)!);
+    const x0 = Math.min(...rs.map((r) => r.x)) - 110;
+    const x1 = Math.max(...rs.map((r) => r.x + r.w)) + 220;
+    const y0 = Math.min(...rs.map((r) => r.y)) - 30;
+    const y1 = Math.max(...rs.map((r) => r.y + r.h)) + 70;
+    const members = looseWidgets.filter((el) => {
+      if (claimed.has(el)) return false;
+      const lines = textLines(el);
+      if (!lines) return false;
+      const r = rectOf(el);
+      if (!r) return false; // 带文字但矩形退化（0×0 且无 svg 兜底）的控件进不了面板
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+      return cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1;
+    });
+    if (members.length < 4) continue;
+    const rows = clusterPanelRows(members);
+    if (rows.length < 4) continue;
+    members.forEach((el) => { claimed.add(el); panelMembers.add(el); });
+    panelTables.push({
+      headers: ['字段', '内容'],
+      rows,
+      rect: { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) },
+      _panel: true,
+    });
+  }
+
   // ─── 2. 表格：.table_cell + viewbox 坐标 → 确定性网格 ──────
 
   const tables: DomTable[] = [];
@@ -203,8 +337,11 @@ export function axureExtract(): AxureExtract {
   }
 
   allWidgets.forEach((widget) => {
-    const cells = Array.from(widget.querySelectorAll(':scope > .table_cell'));
-    if (cells.length < 4) return;
+    const cells = cellChildrenOf(widget);
+    // 「表格」注释是导出器声明的容器信号：格数不足 4 也进网格流程，
+    // 由后续 ≥1 行 × ≥2 列的骨架校验决定是否输出
+    const declaredTable = /表格/.test((metaOf(widget)?.type || '').trim());
+    if (cells.length < 4 && !(declaredTable && cells.length >= 1)) return;
 
     const items = cells.map((c) => ({
       r: rectOf(c) || { x: 0, y: 0, w: 0, h: 0 },
@@ -227,20 +364,68 @@ export function axureExtract(): AxureExtract {
       grid[nearestKey(rowKeys, it.r.y)][nearestKey(colKeys, it.r.x)] = it.text;
     });
 
-    const filled = grid.flat().filter((c) => c !== '').length;
-    const cellsTotal = rowKeys.length * colKeys.length;
-    if (rowKeys.length >= 2 && colKeys.length >= 2 && filled / cellsTotal >= 0.3) {
+    // Axure 偶发把单元格导成无 table_cell 的裸子控件（实测VIP后台48个直接子控件），按坐标就近并入空格、不覆盖真实内容
+    Array.from(widget.querySelectorAll(':scope > .ax_default')).forEach((el) => {
+      if (isCell(el)) return;
+      const lines = textLines(el);
+      if (!lines) return;
+      const r = rectOf(el);
+      if (!r) return;
+      const ri = nearestKey(rowKeys, r.y);
+      const ci = nearestKey(colKeys, r.x);
+      if (!grid[ri][ci]) grid[ri][ci] = lines.join('<br>');
+    });
+
+    // 页面级悬浮控件并入：压在表格上的独立控件（如资源配置表的「操作/删除」
+    // 按钮，与表格无 DOM 父子关系），按中心点就近填进空格子；同一格多条文本
+    // 用 " / " 连接。弹窗面板成员即使与表格矩形相交也跳过（已归面板）。
+    const tx0 = Math.min(...items.map((it) => it.r.x));
+    const ty0 = Math.min(...items.map((it) => it.r.y));
+    const tx1 = Math.max(...items.map((it) => it.r.x + it.r.w));
+    const ty1 = Math.max(...items.map((it) => it.r.y + it.r.h));
+    const floatTexts = new Map<number, string[]>();
+    allWidgets.forEach((el) => {
+      if (el === widget || widget.contains(el) || el.contains(widget)) return;
+      if (isTableRelated(el) || panelMembers.has(el)) return;
+      const lines = textLines(el);
+      if (!lines) return;
+      const r = rectOf(el);
+      if (!r) return;
+      if (r.x < tx0 - 6 || r.y < ty0 - 6 || r.x + r.w > tx1 + 6 || r.y + r.h > ty1 + 6) return;
+      const key = nearestKey(rowKeys, r.y + r.h / 2) * colKeys.length + nearestKey(colKeys, r.x + r.w / 2);
+      const list = floatTexts.get(key);
+      if (list) list.push(lines.join('<br>')); else floatTexts.set(key, [lines.join('<br>')]);
+    });
+    floatTexts.forEach((texts, key) => {
+      const ri = Math.floor(key / colKeys.length);
+      const ci = key % colKeys.length;
+      if (!grid[ri][ci]) grid[ri][ci] = texts.join(' / ');
+    });
+
+    // 裁剪：全空行去掉（预留空行是噪音）；有数据的表再裁掉数据行全空的列，
+    // 表头有字也不保留（变更记录表预留的「修改人/补充」空列）。整表无数据时
+    // 保留列骨架——空表本身也是结构信息（如 VIP经营数据空表）。不按填充率
+    // 整表丢弃——明细集中在少数大格的稀疏表会被误杀导致整页文字为空
+    const dataRows = grid.slice(1);
+    const hasAnyData = dataRows.some((row) => row.some((c) => c !== ''));
+    const rowKept = grid.map((row) => row.some((c) => c !== ''));
+    const colKept = hasAnyData
+      ? colKeys.map((_, c) => dataRows.some((row) => row[c] !== ''))
+      : colKeys.map(() => true);
+    const pruned = grid
+      .filter((_, r) => rowKept[r])
+      .map((row) => row.filter((_, c) => colKept[c]));
+    // ≥1 行 × ≥2 列即输出：只有表头的空表也是结构（VIP经营数据）。
+    if (pruned.length >= 1 && pruned[0].length >= 2) {
       // 边界矩形：供标题推断（找表格旁边的标注文本块）与空间定位
-      const x0 = Math.min(...items.map((it) => it.r.x));
-      const y0 = Math.min(...items.map((it) => it.r.y));
       tables.push({
-        headers: grid[0],
-        rows: grid.slice(1),
+        headers: pruned[0],
+        rows: pruned.slice(1),
         rect: {
-          x: x0,
-          y: y0,
-          w: Math.max(...items.map((it) => it.r.x + it.r.w)) - x0,
-          h: Math.max(...items.map((it) => it.r.y + it.r.h)) - y0,
+          x: tx0,
+          y: ty0,
+          w: tx1 - tx0,
+          h: ty1 - ty0,
         },
       });
     }
@@ -257,14 +442,20 @@ export function axureExtract(): AxureExtract {
     if (headers.length || rows.length) tables.push({ headers, rows });
   });
 
+  // 弹窗面板表追加在实体表格之后
+  panelTables.forEach((t) => tables.push(t));
+
   // ─── 3. 控件块：按文档顺序，带类型/名称/行结构 ─────────────
 
   const blocks: AxureBlock[] = [];
   let idx = 0;
   allWidgets.forEach((el) => {
-    if (el.classList.contains('table_cell')) return;          // 单元格已进表格
-    if (el.querySelector(':scope > .table_cell')) return;      // 表格容器本身
-    if (el.closest('.table_cell')) return;
+    if (isCellEl(el)) return;                                 // 单元格已进表格
+    if (el.querySelector(CELL_CHILD_SEL)) return;             // 表格容器本身
+    if (el.closest(CELL_SEL)) return;
+    // 注释声明为单元格且位于表格容器内：同样已进网格，不再作为控件块输出
+    if (isCellComment(el) && tableWidgets.some((t) => t !== el && t.contains(el))) return;
+    if (panelMembers.has(el)) return;                          // 弹窗面板成员已结构化
 
     const meta = metaOf(el);
     const lines = textLines(el);
@@ -272,13 +463,25 @@ export function axureExtract(): AxureExtract {
     if (!lines && imgs === 0) return;
 
     idx += 1;
+    // Axure 便签的导出注释仍是「矩形」，但 class 带 sticky 标记——归为便签类型
+    let blockType = meta?.type || el.className.match(/_([^\s]+)/)?.[1] || '?';
+    if (/sticky/i.test(String(el.className || ''))) blockType = '便签';
+    // 文字颜色：标注标记与界面内同文标注的同色匹配用
+    let color: string | undefined;
+    try {
+      const textEl = el.querySelector('.text');
+      color = getComputedStyle((textEl || el) as Element).color;
+    } catch {
+      color = undefined;
+    }
     blocks.push({
       i: idx,
-      type: meta?.type || el.className.match(/_([^\s]+)/)?.[1] || '?',
+      type: blockType,
       name: meta && meta.name && meta.name !== 'Unnamed' ? meta.name : '',
       lines: lines || [],
       imgs,
       rect: rectOf(el),
+      color,
     });
   });
 
@@ -294,8 +497,7 @@ export function axureExtract(): AxureExtract {
   }
 
   function buildSections(): PageSection[] {
-    // 不再按「有表格就跳过」豁免：表格 + 界面截图混排的画布页恰恰需要切分，
-    // 把 mockup 示例文案归到所属界面；纯表格页通常没有 ≥250×200 的内嵌大图，锚点为空自然不切
+    // 不再豁免「有表格就跳过」：表格+界面截图混排的画布页恰需切分（把示例文案归所属界面）；纯表格页无大图锚点自然不切
     const bigImgs = images.filter((im) => im.width >= 250 && im.height >= 200).length;
     const withRect = blocks.filter((b) => b.rect && (b.lines.length || b.imgs));
     if (!withRect.length) return [];
@@ -464,5 +666,5 @@ export function axureExtract(): AxureExtract {
     .filter(Boolean)
     .join('\n');
 
-  return { text, tables, images, sections, blocks, flow };
+  return { text, tables, images, sections, blocks, flow, widgetCount: allWidgets.length, containers: outerContainers };
 }

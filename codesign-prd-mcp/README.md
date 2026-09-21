@@ -7,10 +7,10 @@
 - **确定性优先、VLM 补充**：表格、规则文字、流程拓扑优先用 Axure DOM 确定性还原（零 VLM 成本、零幻觉），视觉模型只负责 DOM 拿不到的内容（内嵌图文字、纯图片页、拓扑还原失败的流程图）；两者分区输出并各自标注来源，文末汇总待确认项
 - **结构化输出**：表格 / 流程 / 规则 / 界面文案 / 交互状态各成一节（Markdown PRD），同时产出机器可读 JSON（`output/<分组>_结构化数据.json`）；表格还原为带语义标题的 Markdown 表格，流程图附节点/连线/分支与 Mermaid
 - **画布页空间切分**：整页多界面拼贴的画布以大内嵌图为锚点切成「界面区块」逐块输出，控件文案按区块归属、重复文案合并为 ×N、相邻同表头表格自动合并，长页输出不刷屏
-- **分段截图**：超大页面自动网格分段滚动截图，宽图/长图内容不丢失
+- **分段截图**：超大页面自动网格分段滚动截图，宽图/长图内容不丢失（截图只为视觉解析服务——未启用 VLM 时整条截图链路都会跳过）
 - **缓存与断点续跑**：VLM 结果按截图哈希缓存且为段级增量，重复运行不重复付费；中断后用 `pageNames` 只补缺失页/段，已完成部分秒回
 - **三档详细度**：`summary` / `standard` / `full`
-- **优雅降级**：未配置视觉模型时自动退化为仅 DOM 文字提取
+- **优雅降级**：未配置视觉模型（或 `vlmEnabled:false`）时退化为仅 DOM 文字提取，并跳过全部分段截图与内嵌图定向截图
 - **进度上报**：长任务逐页/逐段实时上报 progress，大多数宿主不会撞请求超时
 
 ## 安装与运行
@@ -81,12 +81,14 @@ npm run test:doc   # 文档输出清理回归：规则去重 / 表格合并 / �
 |---|---|---|
 | `get_prototype_outline` | 获取原型页面目录大纲（左侧导航树） | `url?` / `password?` |
 | `get_page_content` | 读取单个页面的结构化内容（组件/交互/表格/内嵌原型图清单） | `url?` / `password?` / `pageName` / `vlmEnabled?` |
-| `get_requirement_doc` ⭐ | 获取指定需求分组的完整 PRD（自动遍历所有页 + 分段截图 + VLM 解析） | `url?` / `password?` / `groupName`(必填) / `vlmEnabled?` / `detailLevel?` / `outputFile?` / `pageNames?`(按页分块重跑) |
+| `get_requirement_doc` ⭐ | 获取指定需求分组的完整 PRD（自动遍历所有页 + 分段截图 + VLM 解析） | `url?` / `password?` / `groupName`(必填) / `vlmEnabled?`（false = 纯 DOM 且不截图） / `detailLevel?` / `outputFile?` / `pageNames?`(按页分块重跑) |
 | `analyze_flowchart` | 单独分析一张流程图截图，输出节点/连线/分支 + Mermaid | `imagePath`(必填) |
 | `cache_stats` | 查看 VLM 解析缓存的条目数与体积 | 无 |
 | `clear_cache` | 清空 VLM 解析缓存，下次调用重新请求视觉模型 | 无 |
 
 **VLM 分级策略**：VLM 只用于 DOM 提取不到的内容——内嵌图（图内文字，DOM 无法获取）始终单独定向解析；整页分段仅对 DOM 提取不到内容的页面运行（纯图片页、DOM 拓扑还原失败的流程图）。表格、规则文字、流程拓扑均由 DOM 确定性提取并作为真源优先渲染，无需视觉模型参与。
+
+**未启用 VLM 则不截图**：截图只为视觉解析服务，没有人消费时不必生成。未配置 `VLM_API_KEY`（或传 `vlmEnabled:false`）时，分段截图与内嵌图定向截图全部跳过，只做 DOM 确定性提取，爬取更快、也不落盘任何图片。
 
 `get_requirement_doc` 默认把大文档（>30KB）自动写入 `output/<分组名>_需求文档.md` 并返回**文件路径 + 每页摘要**（显式传 `outputFile:true` 恒写文件、`outputFile:false` 强制全文），避免大文档占满上下文；之后按需读文件即可。`detailLevel` 默认 `standard`，分组名不确定时直接调用，失败会返回候选列表。
 
@@ -116,7 +118,7 @@ npm run test:crawl -- --url=https://codesign.qq.com/s/xxx --group=<需求分组�
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `VLM_API_KEY` | 否 | - | 视觉模型 API Key，配置后启用流程图/表格/页面自动解析 |
+| `VLM_API_KEY` | 否 | - | 视觉模型 API Key，配置后启用流程图/表格/页面自动解析；未配置则纯 DOM 提取且不截图 |
 | `VLM_BASE_URL` | 否 | `https://api.openai.com/v1` | API 基础 URL（带不带 `/v1` 均可，自动归一化） |
 | `VLM_USE_V1` | 否 | `1` | 设 `0` 切到不带 `/v1` 的 `/chat/completions`（少数网关） |
 | `VLM_MODEL` | 否 | `gpt-4o` | 视觉模型名称 |

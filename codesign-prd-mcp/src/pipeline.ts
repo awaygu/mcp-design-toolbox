@@ -77,8 +77,10 @@ function domIsRich(page: CrawledPage): boolean {
 /**
  * 该页是否需要整页分段 VLM。内嵌图解析不受此判定影响，始终独立排队。
  * 流程图页 DOM 拓扑还原失败（flow 为空）时，截图是节点/连线的唯一来源，仍需分段。
+ * 空页面（0 个控件）例外：截图必然是白图，送 VLM 只会产出幻觉内容。
  */
 function needsSegmentVlm(page: CrawledPage, type: PageType): boolean {
+  if (page.widgetCount === 0) return false;
   return !domIsRich(page) || (type === 'flowchart' && !page.flow);
 }
 
@@ -95,6 +97,7 @@ function finalize(
     pageName: pageData.pageName,
     domText: pageData.text || '',
     domTables: pageData.tables || [],
+    containers: pageData.containers,
     images: pageData.images || [],
     imageAnalysis,
     sections: pageData.sections,
@@ -134,12 +137,7 @@ function toImageAnalysis(pageData: CrawledPage, results: VlmResult[]): ImageAnal
     .filter((a) => a.texts.length > 0 || a.summary || a.error);
 }
 
-/**
- * 段级缓存解析：命中的段直接复用，只把缺失的段提交 VLM。
- * 每段完成立即落盘（onTaskDone）——长分组跑一半超时/中断后，
- * 重跑只需补缺失的段，而不是整页/整组从头再来。
- * @returns 与 paths 等长、按原顺序对齐的解析结果
- */
+/** 段级缓存解析：命中段复用，只提交缺失段给 VLM；每段完成即落盘，超时中断后重跑只补缺口。@returns 与 paths 等长、按序对齐 */
 async function analyzeSegmentsResumable(
   url: string,
   pageName: string,
@@ -308,8 +306,7 @@ export async function processPages(
       return { pageData, type, vlmSegments: [], skipVlm: true };
     }
 
-    // DOM 已充分提取的页跳过整页分段（内嵌图不受影响，依旧排队）。
-    // 跳过分段是策略而非失败——文档走 DOM 确定性内容，附录标注「VLM 策略跳过」
+    // DOM 已充分的页跳整页分段（内嵌图仍排队）；属策略非失败，文档走 DOM 确定性内容，附录标注「VLM 策略跳过」
     const runSegments = needsSegmentVlm(pageData, type);
 
     // 内嵌图与页面分段是两套独立缓存：页面缓存只存 vlmSegments，

@@ -24,6 +24,7 @@ async function main(): Promise<void> {
 
   const t1 = Date.now();
   const pages = await getGroupPages(GROUP, URL, {
+    screenshots: USE_VLM,
     onProgress: (m) => console.log(`    · ${m}`),
   });
   console.log(`[2] 爬取 ${pages.length} 页，耗时 ${Date.now() - t1}ms`);
