@@ -82,8 +82,7 @@ function pluginCornersOf(it: any): Record<string, number> | null {
   return { topLeft: at(0), topRight: at(1), bottomRight: at(2), bottomLeft: at(3) };
 }
 
-// text：新格式样式集中在 layer.font{content,size,line,align,color,styles[]}；
-// 重组为旧格式的 text.style{content,color,font{size,name,lineHeight,letterSpacing,align…}}
+// text：新格式样式集中在 layer.font{…}，重组为旧格式 text.style{content,color,font{size,name,lineHeight,letterSpacing,align…}}
 function pluginTextToLegacy(it: any): { value: string; style: Record<string, any> } | null {
   const f = it.font;
   if (!f || typeof f !== 'object') return null;
@@ -180,8 +179,7 @@ function convertPluginNode(it: any, childrenOf: Map<string, any[]>): any {
 }
 
 /**
- * 新版插件格式检测与转换：不是新格式（无 info 数组）或已是旧格式（有 artboard）时原样返回。
- * 转换产物 {artboard:{name,frame,layers}} 与旧格式同形，normalizeSketch / collectSlices 直接可用。
+ * 新版插件格式检测与转换：非新格式（无 info）或已是旧格式（有 artboard）时原样返回；产物 {artboard:{name,frame,layers}} 与旧格式同形，normalizeSketch/collectSlices 直接可用。
  */
 export function toLegacySketchJson(json: Record<string, any>): Record<string, any> {
   if (!json || typeof json !== 'object' || json.artboard) return json;
@@ -243,8 +241,7 @@ export function normalizeShape(shape: Record<string, any>): DesignLayer {
   };
   // 切图标记层的名字是下载句柄（lanhu_download_slices 按 sliceNames 过滤），豁免自动名抑制
   if (shape.name && (shape.hasExportImage || !isNoiseName(String(shape.name)))) layer.name = shape.name;
-  // 切图 URL 只留在 slices 清单（collectSlices 从原始树收集），图层上只留 hasExportImage 标记；
-  // 非 hasExportImage 的位图层（真正的背景图）保留 imageUrl，Agent 只能靠它引用
+  // 切图 URL 只在 slices 清单（collectSlices 从原始树收集），图层上只留 hasExportImage 标记；非 hasExportImage 的位图层（背景图）保留 imageUrl，供 Agent 引用
   if (shape.hasExportImage) {
     layer.hasExportImage = true;
   } else if (shape.image?.imageUrl) {
@@ -393,8 +390,7 @@ export function normalizeSketch(json: Record<string, any>): { layers: DesignLaye
   let walkedCount = 0; // 全树实际遍历的图层数（含被丢弃的容器）
   let backupLayerCount = 0; // 「备份/backup」命名的备用层（实际开发不实现）
   let booleanOperandLayerCount = 0; // 布尔运算的操作数子层（不独立渲染，折叠只留布尔节点）
-  // 有「会实际渲染的东西」才输出：涂料(fill/gradient/color)、文字、图片、描边、阴影。
-  // 仅透明度/仅圆角不构成渲染——没有填充描边时 opacity 和 radius 谁都看不见（实测设计稿里常见这种空壳层）
+  // 有「会实际渲染的东西」才输出：fill/gradient/color、文字、图片、描边、阴影；仅透明度/圆角不构成渲染（无填充描边时 opacity/radius 不可见，常见空壳层）
   const isContentful = (l: DesignLayer): boolean =>
     !!(l.fill || l.gradient || l.color || l.text || l.imageUrl || l.hasExportImage || l.border || l.shadow || l.innerShadow);
   // 自动生成名对 AI 无信息量，且会吃掉过滤省下的字节（判定同 isNoiseName，但不含蒙版/切片豁免——
@@ -505,9 +501,7 @@ export function normalizeSketch(json: Record<string, any>): { layers: DesignLaye
     });
   }
 
-  // ④ 出画窄条剔除：可见面积占比过低的纯色矩形（如 84% 出画、只在屏幕边缘露 16% 的窄条）
-  //    多为设计师停放在画布旁的素材残留，实现页面时不会用到。
-  //    注意：贴边探出的装饰是合法设计模式，误杀时设 LANHU_MIN_VISIBLE_FRACTION=0 关闭（默认 0.25）。
+  // ④ 出画窄条剔除：可见面积占比过低的纯色矩形（如 84% 出画、边缘只露 16%）多为画布旁素材残留，实现页面用不到。贴边装饰是合法设计，误杀时设 LANHU_MIN_VISIBLE_FRACTION=0 关闭（默认 0.25）
   const minVisibleFrac = Number(process.env.LANHU_MIN_VISIBLE_FRACTION ?? 0.25);
   let sliverLayerCount = 0;
   if (minVisibleFrac > 0 && canvasW > 0 && canvasH > 0) {

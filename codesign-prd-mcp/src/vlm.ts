@@ -99,11 +99,7 @@ interface VlmResponse {
   status: number;
 }
 
-/**
- * 归一化 catch 到的未知异常。
- * 标注成 VlmError（而非 Error）是因为重试逻辑要读 status / nonJson；
- * 这两个字段可选，普通 Error 也能安全地当作 VlmError 使用。
- */
+/** 归一化 catch 异常为 VlmError；status/nonJson 可选，普通 Error 也可安全当作 */
 function toVlmError(err: unknown): VlmError {
   return err instanceof Error ? err : new Error(String(err));
 }
@@ -115,9 +111,7 @@ export function isVLMConfigured(): boolean {
   return !!API_KEY;
 }
 
-/**
- * 影响解析结果但不体现在入参里的指纹，用于缓存键隔离
- */
+/** 影响解析结果但不入参的指纹，用于缓存键隔离 */
 export function getVlmVersion(): string {
   // BASE_URL 参与指纹：换供应商但模型名相同时，避免缓存互相污染
   return `${PROMPT_VERSION}::${MODEL}::${BASE_URL}`;
@@ -485,12 +479,7 @@ function imagePrompt(context?: string): string {
 
 // ─── 单段解析 ─────────────────────────────────────────────────
 
-/**
- * 解析单张截图
- * @param imagePath - 图片路径
- * @param type - 页面类型
- * @param options - { segmentIndex, totalSegments, pageText }
- */
+/** 解析单张截图；@param imagePath 路径 @param type 页面类型 @param options {segmentIndex,totalSegments,pageText} */
 export async function analyzeSingleImage(
   imagePath: string,
   type: PageType,
@@ -663,10 +652,7 @@ export function flowchartToMermaid(flowchart: VlmFlowchart): string {
   return mermaid;
 }
 
-/**
- * 将表格数据转为 Markdown 表格
- * 单元格内换行转 <br>（Markdown 表格内不能有裸换行）、竖线转义防破坏列结构
- */
+/** 表格转 Markdown：单元格换行转 <br>，竖线转义防破坏列结构 */
 export function tableToMarkdown(table: {
   headers?: string[];
   rows?: string[][];

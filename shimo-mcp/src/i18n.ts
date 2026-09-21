@@ -44,7 +44,7 @@ export function toLanguageMap(data: SheetData, opts: ToLanguageMapOptions = {}):
   // 基准语言列（zh / zh-CN，繁体不算）：仅用于 groupRows 分组行判定
   const zhCol = data.headers.find((h) => /^zh(-CN)?$/.test(detectLanguageColumns([h], opts.columnMap ?? [])[0]?.lang || ''));
 
-  // 内置 txt_ 规则的基准列：从左到右第一个「有表头且有数据」的列；无表头的列不能作为基准列
+  // 内置 txt_ 基准列：从左到右第一个「有表头且有数据」的列；无表头列不能作基准列
   let baseHeader: string | undefined;
   if (!data.headersSynthesized) {
     for (const h of data.headers) {

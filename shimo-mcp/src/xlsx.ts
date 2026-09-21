@@ -318,8 +318,7 @@ function colLetters(index0: number): string {
 }
 
 /**
- * 生成 xlsx 文件（支持一个或多个 sheet）。
- * rows 是二维文本数组（不含表头概念，第 1 行就是第 1 行）。
+ * 生成 xlsx（支持多 sheet）。rows 为二维文本数组，第 1 行即第 1 行（无表头概念）。
  */
 export function buildXlsx(sheets: Array<{ name: string; rows: string[][] }>): Buffer {
   if (!sheets.length) throw new Error('buildXlsx 需要至少一个 sheet');

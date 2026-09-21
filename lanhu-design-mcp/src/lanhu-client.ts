@@ -589,8 +589,7 @@ export async function downloadSlices(
       const expectW = scaleNum ? Math.round(s.w * scaleNum) : 0;
       const expectH = scaleNum ? Math.round(s.h * scaleNum) : 0;
 
-      // 预测落盘文件名：2x/1x/3x 的格式由 OSS format 参数确定（png/webp），
-      // 存在性检查可先于下载；original 的真实格式要验真后才知道，检查挪到验真之后
+      // 预测文件名：2x/1x/3x 格式由 OSS format 参数确定，存在性检查可先于下载；original 真实格式须验真后才知，检查挪到验真后
       const predictedPath = scale === 'original' ? null : path.join(dir, `${cleanName}_${hash}${suffix}.${format}`);
       if (predictedPath && skipExist && existsSync(predictedPath)) {
         existCount++;

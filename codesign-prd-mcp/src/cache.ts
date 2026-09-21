@@ -93,10 +93,7 @@ export function hasCache(params: CacheKeyParams): boolean {
   return getCache(params) !== null;
 }
 
-/**
- * 清空缓存
- * @returns 被清掉的缓存条数与字节数；删除失败时 failed 为 true
- */
+/** 清空缓存；@returns 条数与字节数，失败 failed=true */
 export function clearCache(): CacheStats {
   const before = cacheStats();
   try {

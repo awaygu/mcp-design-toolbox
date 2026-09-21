@@ -50,10 +50,7 @@ export function withHeartbeat<T>(
   return task().finally(() => clearInterval(timer));
 }
 
-/**
- * 统一取出错误信息。strict 模式下 catch 变量是 unknown，
- * 直接用 err.message 会编译失败，这里做一次收口。
- */
+/** 统一取错误信息（strict 下 catch 为 unknown，err.message 编译不过，这里收口） */
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;

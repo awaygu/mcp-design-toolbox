@@ -6,8 +6,7 @@
 //   POST /panda-api/drive/batch_downloads {guids:[guid]}               创建导出任务（整文件 xlsx 打包 ZIP）
 //   GET  /panda-api/drive/tasks/{taskId}                               轮询任务进度，完成后 detail.url 为下载地址
 //
-// 注意：sheet（工作表）清单没有 REST 接口，清单从导出的 xlsx 读（exportWorkbook 返回 sheetNames），
-// 或由用户直接给工作表名。
+// 注意：石墨无 sheet 清单 REST 接口，清单从导出 xlsx 读取（exportWorkbook 返回 sheetNames），或由用户给表名。
 
 const BASE = (process.env.SHIMO_BASE_URL || 'https://shimo.im').replace(/\/+$/, '');
 
@@ -168,7 +167,7 @@ export async function readSheetRaw(guid: string, sheet: string, cookie: string, 
       } else {
         consecutiveEmpty = 0;
       }
-      // 空行也占位（保持石墨行号对齐：数组下标 + 1 = 石墨行号）
+      // 空行也占位，保持行号对齐：数组下标+1=石墨行号
       all.push(row || []);
     }
 

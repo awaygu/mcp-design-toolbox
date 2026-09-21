@@ -53,8 +53,7 @@ export interface DesignLayer {
     blur: number;
     spread: number;
   };
-  // 图层透明度（仅无 fill/gradient/color 的图层导出，如 image 切图——有颜色的图层透明度已烘进 rgba
-  // alpha，再叠此字段会双重叠加；image 图层 Agent 需自行写 CSS opacity）
+  // 图层透明度：仅无 fill/gradient/color 的导出（如切图）；有颜色的已烘进 rgba，再叠会双重叠加；image 层 Agent 自行写 CSS opacity
   opacity?: number;
   // 切图（hasExportImage 的图层）：开发时下载引用
   imageUrl?: string;

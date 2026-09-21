@@ -364,12 +364,7 @@ export async function capturePageSegments(
   });
 }
 
-/**
- * 单轴滚动位置序列：0 开始按步长推进，末点强制贴边。
- * 末点贴边可避免最后一段被浏览器 clamp 到同一位置、截出重复画面。
- * @param contentSize - 内容总尺寸（scrollHeight/scrollWidth）
- * @param viewSize - 视口尺寸（clientHeight/clientWidth）
- */
+/** 单轴滚动序列：0 起步进、末点强制贴边（避免被 clamp 到同位置重复）；@param contentSize 内容尺寸 @param viewSize 视口尺寸 */
 function scrollPoints(contentSize: number, viewSize: number): number[] {
   const maxScroll = Math.max(contentSize - viewSize, 0);
   const step = Math.max(viewSize - OVERLAP, 100);
@@ -403,10 +398,7 @@ async function collectContentRects(frame: Frame): Promise<ContentRect[]> {
   }
 }
 
-/**
- * 计算需要截取的网格单元集合（key = 行下标*列数+列下标）。
- * 叶子矩形与格子相交即保留；无矩形信息时返回 null（全量截取，宁多勿缺）。
- */
+/** 需截取的网格集合（key=行*列数+列）；叶子相交即保留；无矩形返回 null 全量截取 */
 function planNeededCells(rects: ContentRect[], plan: GridPlan): Set<number> | null {
   const { yPoints, xPoints, viewW, viewH, contentW, contentH } = plan;
   if (!rects.length) return null;

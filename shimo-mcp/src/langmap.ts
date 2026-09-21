@@ -12,7 +12,7 @@ export interface ColumnMapRule {
   type?: 'exact' | 'regex' | 'fuzzy';
 }
 
-/** 表头关键词 → 语言码。匹配按序执行（先长词后短词，避免「中文」吃掉「繁体中文」） */
+/** 表头关键词 → 语言码；按序匹配（先长词后短词，避免「中文」吞掉「繁体中文」） */
 const HEADER_RULES: Array<{ pattern: RegExp; lang: string }> = [
   { pattern: /繁体|傳統|traditional/i, lang: 'zh-TW' },
   { pattern: /简体|简中|simplified/i, lang: 'zh-CN' },

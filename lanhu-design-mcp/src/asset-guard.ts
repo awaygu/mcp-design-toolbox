@@ -238,17 +238,12 @@ function svgIntrinsicSize(text: string): { width?: number; height?: number } {
 // ─── 多倍图 URL ─────────────────────────────────────────────────
 
 /**
- * 生成多倍图下载 URL（移植 _build_scale_urls，按蓝湖 CDN 实测适配）。
- *
- * 蓝湖 CDN 切图只存一份原图（存储尺寸 = 设计逻辑尺寸 × storedScale，实测固定 4x）。
- * 其它倍率拼 x-oss-process=image/resize 参数由阿里云 OSS 在线出图；
- * 请求尺寸恰为存储尺寸时直接返回原 URL，不加参数。
- *
+ * 生成多倍图下载 URL（蓝湖 CDN 只存一份原图，存储尺寸 = 逻辑尺寸 × storedScale(实测 4x)；
+ * 其它倍率拼 x-oss-process=image/resize 由 OSS 在线出图，恰为存储尺寸时直返原 URL）。
  * @param imageUrl    CDN 原图 URL
  * @param logicalW/H  设计逻辑尺寸（1x，即图层 frame 的 w/h）
  * @param storedScale 存储倍率（蓝湖实测 4x，默认 4）
- * @param format      输出格式（png/webp）；png 且恰为存储尺寸时 URL 保持原样，
- *                    webp 等其它格式即使 original 也需要拼转换参数
+ * @param format      输出格式；png 恰为存储尺寸时保持原样，webp 等即使 original 也需拼转换参数
  */
 export function buildScaleUrls(
   imageUrl: string,

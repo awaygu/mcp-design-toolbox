@@ -18,8 +18,7 @@ async function main(): Promise<void> {
     name: 'lanhu-design-mcp',
     version: '0.4.0',
   }, {
-    // server 级工作流说明：宿主会注入 Agent 系统上下文（README 里的提示词骨架住在这里，
-    // Agent 不看 README，只有这里的内容它能稳定看到）
+    // server 级工作流说明：宿主注入 Agent 系统上下文（README 提示词骨架住这，Agent 不看 README，只有这里能稳定看到）
     instructions: [
       '蓝湖设计稿读取工作流：',
       '1. 找稿（无链接时）：lanhu_list_teams 拿 teamId（多团队）→ lanhu_list_directory 按分组名定位 projectId → lanhu_read_sector 列分组内稿目录（稿名/尺寸/层数）→ 按稿名挑出目标。',

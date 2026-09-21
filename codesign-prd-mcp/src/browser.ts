@@ -68,10 +68,7 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
-/**
- * 等待页面网络空闲
- * @param timeout - 超时 ms
- */
+/** 等待网络空闲；@param timeout 超时 ms */
 export async function waitForNetworkIdle(timeout = 10000): Promise<void> {
   if (!page) return;
   try {

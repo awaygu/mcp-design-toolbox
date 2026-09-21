@@ -8,7 +8,7 @@ function cellText(v: unknown): string {
   if (typeof v === 'string') return v;
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
   if (typeof v === 'object') {
-    // 石墨 values API 偶发返回对象形态（富文本/链接），尽力取文本字段
+    // 石墨 values API 偶发返回对象（富文本/链接），尽力取文本字段
     const o = v as Record<string, unknown>;
     if (typeof o.text === 'string') return o.text;
     if (typeof o.value === 'string') return o.value;

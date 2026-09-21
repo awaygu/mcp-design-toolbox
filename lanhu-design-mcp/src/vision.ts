@@ -244,8 +244,7 @@ async function doCallVision({ images = [], text, detail = 'auto' }: VisionInput,
   };
   // GLM 不支持关闭 thinking；其它端点忽略这两个字段
   if (/glm/i.test(MODEL)) {
-    // GLM 的 thinking 推理 token 与正文共享 max_tokens（实测单次推理可写 4k+ token），
-    // 4096 会在正文起头处掐断 → JSON 截断回退 _raw；失败态不进缓存且温度 0，每次必然复现
+    // GLM 的 thinking 推理 token 与正文共享 max_tokens（实测可写 4k+），4096 会在正文起头掐断→JSON 截断回退 _raw；失败态不缓存且温度0，必然复现
     body.max_tokens = Number(process.env.LANHU_VISION_MAX_TOKENS) || 16384;
     body.thinking = { type: 'enabled', clear_thinking: false };
     body.reasoning_effort = 'max';
