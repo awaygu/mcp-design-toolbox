@@ -105,6 +105,7 @@ const server = new McpServer(
   {
     // server 级工作流说明：宿主会注入 Agent 系统上下文（Agent 不读 README，只有这里稳定可见）
     instructions: [
+      '触发规则：用户提到 CoDesign / codesign / 原型 / 需求文档 等字样，想查看其内容、结构或章节（例：「了解需求文档中 110版本 的内容」）时，必须调用本 server 的工具；用户未附链接也要调用（url/password 已通过环境变量预置）。',
       'CoDesign 原型（Axure）→ 结构化需求文档（PRD）工作流：',
       '1. get_prototype_outline 拿页面目录大纲（节点带完整路径；同名页面靠完整路径「父分组/页面名」消歧）。',
       '2. get_requirement_doc（核心）：一次取整个需求分组的完整 PRD，自动遍历页面 + 分段截图 + VLM 解析。',
@@ -123,7 +124,7 @@ server.registerTool(
   'get_prototype_outline',
   {
     description:
-      '获取 CoDesign 产品原型的页面目录大纲（左侧导航树），用于了解原型结构和定位需求页面',
+      '获取 CoDesign （codesign）原型需求文档的页面目录大纲（左侧导航树），用于了解原型结构和定位需求页面',
     inputSchema: {
       url: z.string().optional().describe('CoDesign 分享链接；不传时使用环境变量 CODESIGN_URL'),
       password: z
@@ -164,7 +165,7 @@ server.registerTool(
   'get_page_content',
   {
     description:
-      '获取 CoDesign 原型中单个页面的结构化内容（启用 VLM 为视觉解析后纯文本，含组件/交互/表格；未启用则纯 DOM 提取、不截图）。页面同名时传完整路径「父分组/页面名」',
+      '获取 CoDesign（codesign）原型需求文档中单个页面/章节的结构化内容（组件/交互/表格/流程）。页面同名时传完整路径「父分组/页面名」',
     inputSchema: {
       url: z.string().optional().describe('CoDesign 分享链接；不传时使用环境变量 CODESIGN_URL'),
       password: z.string().optional().describe('访问密码；不传时使用环境变量 CODESIGN_PASSWORD'),
@@ -230,7 +231,7 @@ server.registerTool(
   'get_requirement_doc',
   {
     description:
-      '【核心】获取 CoDesign 原型中指定需求分组的完整结构化需求文档。自动遍历所有页面（启用 VLM 时分段截图 + 视觉解析，未启用则纯 DOM 提取、不截图），输出纯文本 PRD（无截图路径），AI Coding Agent 可直接使用',
+      '【核心】获取 CoDesign（codesign）原型需求文档中指定需求分组的完整结构化需求文档。自动遍历所有页面（启用 VLM 时分段截图 + 视觉解析，未启用则纯 DOM 提取、不截图），输出纯文本 PRD（无截图路径），AI Coding Agent 可直接使用',
     inputSchema: {
       url: z.string().optional().describe('CoDesign 分享链接；不传时使用环境变量 CODESIGN_URL'),
       password: z.string().optional().describe('访问密码；不传时使用环境变量 CODESIGN_PASSWORD'),
