@@ -28,6 +28,7 @@ export interface ColumnData {
   values: Array<{ _row: number; value: string }>;
   /** values 中非空值的条数 */
   nonEmpty: number;
+  /** 按列直读时为扫描到的数据区行数（values.length）；不是全表非空行数 */
   totalRows: number;
   truncated: boolean;
 }
