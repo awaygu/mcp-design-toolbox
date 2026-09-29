@@ -83,13 +83,14 @@ env = { SHIMO_COOKIE_FILE = "./.mcp-local/shimo.cookie", SHIMO_URL = "https://sh
 | 工具 | 作用 |
 |---|---|
 | `shimo_check_auth` | 探活 cookie（可顺带返回文档名/权限/更新时间） |
-| `shimo_read_sheet` ⭐ | 读单个工作表：表头 + 数据行（带 `_row` 行号） |
-| `shimo_read_column` | 读单列 `[{_row, value}]`（空值保留），配 `rows` 精确取某行在某列的值 |
+| `shimo_read_sheet` ⭐ | 读单个工作表：表头 + 数据行（带 `_row` 行号）；`outputPath` 落盘 |
+| `shimo_read_column` | 读单列 `[{_row, value}]`（空值保留），配 `rows` 精确取某行在某列的值；`outputPath` 落盘 |
 | `shimo_list_sheets` | 列出全部工作表名（直连 content API 秒回；失败自动回落 xlsx 通道） |
 | `shimo_export_xlsx` | 整文档导出落盘（原生含样式，约 5~20s）；传 `sheet` 直读单表秒级生成（纯数据） |
 | `shimo_export_i18n` | 生成各语言 key→文案 JSON（多行文案拆 key_N） |
 
 - **分页**：`shimo_read_sheet` 默认最多 200 行（`truncated:true` 表示还有更多），大表用 `rows` 按行号分段取，避免撑爆上下文；`shimo_read_column` 默认放宽到 500 行
+- **落盘**：`shimo_read_sheet` / `shimo_read_column` 传 `outputPath` 把完整结果写成 JSON 文件（传目录 → `<工作表名>.json` / `<工作表名>.<列名>.json`；传 `.json` 结尾路径则作为文件路径），只返回文件路径 + 摘要不返回全量数据，落盘时 `limit` 默认放开为不限
 - **列映射**（`shimo_export_i18n`）：表头与内置语言关键词对不上时，传 `columnMap` 入参或建 `.mcp-local/shimo-column-map.json`（配置表优先于内置规则；key 列、备注列天然排除）：
 
 ```json

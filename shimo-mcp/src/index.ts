@@ -52,6 +52,24 @@ function requireGuid(url?: string): string {
   return extractFileId(resolved);
 }
 
+/** 文件名安全化：替换文件系统保留字符 */
+function sanitizeFileName(name: string): string {
+  return name.replace(/[/\\:*?"<>|]/g, '_');
+}
+
+/** 解析落盘目标：以 .json 结尾视为完整文件路径，否则视为目录（文件用 defaultFileName）；目录不存在时自动创建 */
+function resolveOutputFile(outputPath: string, defaultFileName: string): string {
+  const resolved = path.resolve(outputPath);
+  if (/\.json$/i.test(resolved)) {
+    // 显式文件路径也对文件名做安全化（目录部分保持原样），避免 Windows 非法字符导致写盘报 ENOENT
+    const dir = path.dirname(resolved);
+    mkdirSync(dir, { recursive: true });
+    return path.join(dir, sanitizeFileName(path.basename(resolved)));
+  }
+  mkdirSync(resolved, { recursive: true });
+  return path.join(resolved, defaultFileName);
+}
+
 /** 列映射配置表：工具入参 columnMap 优先，其次配置文件（SHIMO_COLUMN_MAP_FILE，默认 .mcp-local/shimo-column-map.json） */
 function resolveColumnMap(args: { columnMap?: ColumnMapRule[] }): ColumnMapRule[] {
   const file = process.env.SHIMO_COLUMN_MAP_FILE || path.join(process.cwd(), '.mcp-local', 'shimo-column-map.json');
@@ -80,13 +98,13 @@ const columnMapSchema = z
 // ─── Server ─────────────────────────────────────────────────────
 
 const server = new McpServer(
-  { name: 'shimo-mcp', version: '0.4.0' },
+  { name: 'shimo-mcp', version: '0.4.1' },
   {
     instructions: [
       '石墨表格结构化读取与 i18n 导出工作流：',
       '1. shimo_check_auth 探活 cookie（401/空数据时先调它区分「cookie 过期」与「无权限」）。',
       '2. shimo_list_sheets 列出全部工作表名。',
-      '3. shimo_read_sheet 读单个工作表：默认返回前 200 行；文档更新后只看改动时传 rows:[行号]（行号=石墨 UI 行号，表头恒在第 1 行），或 columns:[列] 只要某几列。',
+      '3. shimo_read_sheet 读单个工作表：默认返回前 200 行；文档更新后只看改动时传 rows:[行号]（行号=石墨 UI 行号，表头恒在第 1 行），或 columns:[列] 只要某几列。大表可传 outputPath 落盘为 JSON 文件（只返回路径+摘要；read_column 同样支持）。',
       '4. shimo_read_column 读单列：返回 [{_row, value}] 行号→值列表；只要「某行在某列」的值时传 column+rows:[行号] 直接命中，不必拉整表。',
       '5. shimo_export_i18n 生成各语言 key→文案 JSON：列→语言的映射支持 columnMap 参数或 .mcp-local/shimo-column-map.json 配置表（exact/regex/fuzzy 三种匹配），适配任意列名；key 规则(keyColumn)、缺值兜底(fallbackLanguage)、分组行(groupRows) 均可配置。',
       '6. shimo_export_xlsx 导出 xlsx 落盘：传 sheet 只导该工作表（纯数据）；不传 sheet 导出整文档（保留样式/公式，较慢）。',
@@ -125,7 +143,8 @@ server.registerTool(
     description:
       '读石墨表格单个工作表的结构化数据：表头 + 数据行（每行带 _row=石墨 UI 行号）。' +
       '增量场景：rows 传行号列表只取指定行；columns 传表头名或第几列只取指定列——文档更新后不必全量重拉。' +
-      '默认最多 200 行，truncated=true 表示还有更多，用 rows 传后续行号继续取。',
+      '默认最多 200 行，truncated=true 表示还有更多，用 rows 传后续行号继续取。' +
+      '大表可传 outputPath 落盘为 JSON 文件：只返回文件路径+摘要，不撑爆上下文（落盘时 limit 默认放开为不限）。',
     inputSchema: {
       url: z.string().optional().describe('石墨文档链接；不传时使用环境变量 SHIMO_URL'),
       sheet: z.string().describe('工作表名（底部标签页名称，来自 shimo_list_sheets 或用户指定）'),
@@ -140,6 +159,10 @@ server.registerTool(
         .optional()
         .describe('只取这些列。默认全部列'),
       limit: z.number().optional().describe('数据行上限，默认 200；0=不限（慎用，大表会撑爆上下文）'),
+      outputPath: z
+        .string()
+        .optional()
+        .describe('落盘为 JSON 文件：传目录路径写入 <工作表名>.json；传 .json 结尾的路径则作为完整文件路径。落盘时只返回文件路径+摘要'),
       cookie: z.string().optional(),
     },
   },
@@ -148,8 +171,33 @@ server.registerTool(
     const data = await readSheet(guid, args.sheet, credentials(args), {
       ...(args.rows?.length ? { rows: args.rows } : {}),
       ...(args.columns?.length ? { columns: args.columns } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      // 落盘时不占上下文，limit 默认放开为不限；显式传 limit 仍按传入值
+      ...(args.limit !== undefined ? { limit: args.limit } : args.outputPath ? { limit: 0 } : {}),
     });
+    if (args.outputPath) {
+      const file = resolveOutputFile(args.outputPath, `${sanitizeFileName(args.sheet)}.json`);
+      const json = JSON.stringify(data, null, 2);
+      writeFileSync(file, json, 'utf8');
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              file,
+              bytes: Buffer.byteLength(json),
+              sheet: data.sheet,
+              headers: data.headers,
+              rows: data.rows.length,
+              totalRows: data.totalRows,
+              truncated: data.truncated,
+              ...(data.truncated
+                ? { hint: `仍有未落盘的行：用 rows 传后续行号（当前已到第 ${data.rows[data.rows.length - 1]?._row} 行）再落盘一次` }
+                : { hint: '全量数据已写入文件；需要在上下文中查看时用不带 outputPath 的调用' }),
+            }),
+          },
+        ],
+      };
+    }
     const body = {
       ...data,
       hint: data.truncated ? `还有更多行：用 rows 传后续行号（当前已到第 ${data.rows[data.rows.length - 1]?._row} 行）继续取` : undefined,
@@ -166,7 +214,8 @@ server.registerTool(
     description:
       '读工作表的单列数据，返回 [{_row, value}] 行号→值列表。' +
       '要「某一行在某列的值」（如第 30 行的英文文案）最直接：column + rows:[30] 一次命中；只传 column 则返回整列，空值保留为空串（缺翻译一目了然）。' +
-      'column 支持表头名（忽略大小写）或第几列（1-based）。默认最多 500 行，truncated=true 表示还有更多，用 rows 传后续行号继续取。',
+      'column 支持表头名（忽略大小写）或第几列（1-based）。默认最多 500 行，truncated=true 表示还有更多，用 rows 传后续行号继续取。' +
+      '大列可传 outputPath 落盘为 JSON 文件：只返回文件路径+摘要，不撑爆上下文（落盘时 limit 默认放开为不限）。',
     inputSchema: {
       url: z.string().optional().describe('石墨文档链接；不传时使用环境变量 SHIMO_URL'),
       sheet: z.string().describe('工作表名（底部标签页名称，来自 shimo_list_sheets 或用户指定）'),
@@ -175,6 +224,10 @@ server.registerTool(
         .describe('要读的列：表头名或列序'),
       rows: z.array(z.number()).optional().describe('只取这些行（石墨 UI 行号，1-based）。如 [30] 即第 30 行在该列的值'),
       limit: z.number().optional().describe('最多返回多少行，默认 500；0=不限'),
+      outputPath: z
+        .string()
+        .optional()
+        .describe('落盘为 JSON 文件：传目录路径写入 <工作表名>.<列名>.json；传 .json 结尾的路径则作为完整文件路径。落盘时只返回文件路径+摘要'),
       cookie: z.string().optional(),
     },
   },
@@ -182,8 +235,32 @@ server.registerTool(
     const guid = requireGuid(args.url);
     const data = await readColumn(guid, args.sheet, credentials(args), args.column, {
       ...(args.rows?.length ? { rows: args.rows } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      // 落盘时不占上下文，limit 默认放开为不限；显式传 limit 仍按传入值
+      ...(args.limit !== undefined ? { limit: args.limit } : args.outputPath ? { limit: 0 } : {}),
     });
+    if (args.outputPath) {
+      const colTag = typeof args.column === 'number' ? `col${args.column}` : args.column;
+      const file = resolveOutputFile(args.outputPath, `${sanitizeFileName(args.sheet)}.${sanitizeFileName(colTag)}.json`);
+      const json = JSON.stringify(data, null, 2);
+      writeFileSync(file, json, 'utf8');
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              file,
+              bytes: Buffer.byteLength(json),
+              sheet: data.sheet,
+              column: data.column,
+              columnIndex: data.columnIndex,
+              nonEmpty: data.nonEmpty,
+              totalRows: data.totalRows,
+              truncated: data.truncated,
+            }),
+          },
+        ],
+      };
+    }
     const body = {
       ...data,
       hint: data.truncated ? `还有更多行：用 rows 传后续行号（当前已到第 ${data.values[data.values.length - 1]?._row} 行）继续取` : undefined,
@@ -291,7 +368,7 @@ server.registerTool(
       }
       const grid = rows.map((r) => (r || []).map((c) => (c == null ? '' : String(c))));
       const nonEmpty = grid.filter((r) => r.some((c) => c.trim())).length;
-      const safe = (args.fileName || args.sheet).replace(/[/\\:*?"<>|]/g, '_');
+      const safe = sanitizeFileName(args.fileName || args.sheet);
       const file = path.join(dir, `${safe.endsWith('.xlsx') ? safe : safe + '.xlsx'}`);
       const single = buildXlsx([{ name: args.sheet, rows: grid }]);
       writeFileSync(file, single);
@@ -318,7 +395,7 @@ server.registerTool(
     const zip = await downloadExportZip(handle);
     const xlsx = extractXlsxFromZip(zip);
     const book = parseXlsx(xlsx);
-    const safe = (args.fileName || handle.fileName || guid).replace(/[/\\:*?"<>|]/g, '_');
+    const safe = sanitizeFileName(args.fileName || handle.fileName || guid);
     const file = path.join(dir, `${safe.endsWith('.xlsx') ? safe : safe + '.xlsx'}`);
     writeFileSync(file, xlsx);
     return {
