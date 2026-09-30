@@ -195,7 +195,7 @@ export async function processPage(
   pageData: CrawledPage,
   url: string,
   {
-    vlmEnabled = true,
+    vlmEnabled = false,
     context,
     onProgress,
   }: {
@@ -296,7 +296,7 @@ export async function processPages(
   url: string,
   options: ProcessOptions = {}
 ): Promise<MergedPage[]> {
-  const { vlmEnabled = true, concurrency, onPageDone, onProgress, contextFor } = options;
+  const { vlmEnabled = false, concurrency, onPageDone, onProgress, contextFor } = options;
 
   const prepared: PreparedPage[] = pagesData.map((pageData) => {
     if (pageData.error) return { pageData, type: 'page', failed: true, vlmSegments: [] };

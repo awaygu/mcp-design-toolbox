@@ -73,7 +73,7 @@ env = { VLM_API_KEY = "your-api-key", VLM_BASE_URL = "https://api.openai.com/v1"
 - 参与开发时把 `command` 换成 `node`、`args` 换成 `["/path/to/codesign-prd-mcp/dist/index.js"]`（Windows 写 `C:/path/to/...`，JSON 里用正斜杠免转义；未构建可跑源码：`npx tsx` + `src/index.ts`）
 - `CODESIGN_URL` / `CODESIGN_PASSWORD` 也写入 env 后，调用工具时无需再传 `url` / `password`
 - Windows 原生环境部分宿主无法直接执行 `npx`，需改为 `"command": "cmd"`、`"args": ["/c", "npx", "-y", "codesign-prd-mcp"]`
-- 未配置 `VLM_API_KEY` 时自动降级为纯 DOM 提取（不截图、更快），流程图/内嵌图解析不可用，其余正常
+- VLM 视觉解析默认关闭：纯 DOM 提取（不截图、更快），流程图/内嵌图解析不可用，其余正常；传 `vlmEnabled:true` 且配置 `VLM_API_KEY` 时启用，只配了 Key 不传参也不启用
 
 ## MCP 工具
 
@@ -91,7 +91,7 @@ env = { VLM_API_KEY = "your-api-key", VLM_BASE_URL = "https://api.openai.com/v1"
 
 | 变量 | 说明 |
 |---|---|
-| `VLM_API_KEY` | 视觉模型 API Key，未配置则纯 DOM 提取且不截图 |
+| `VLM_API_KEY` | 视觉模型 API Key；VLM 默认关闭，传 `vlmEnabled:true` 且配置了本变量才启用 |
 | `VLM_BASE_URL` / `VLM_MODEL` | 默认 `https://api.openai.com/v1` / `gpt-4o`，任何 OpenAI 兼容接口均可 |
 | `CODESIGN_URL` / `CODESIGN_PASSWORD` | CoDesign 分享链接与访问密码，预置后调用免传 |
 

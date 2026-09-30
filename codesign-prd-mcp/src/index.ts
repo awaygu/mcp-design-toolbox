@@ -97,6 +97,14 @@ function errorResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }], isError: true };
 }
 
+/** VLM 未启用时的进度提示：区分「显式传 true 但未配置 Key」与「默认关闭」两种情形 */
+function vlmDisabledNotice(vlmEnabled?: boolean): string {
+  if (vlmEnabled === true) {
+    return '已传 vlmEnabled:true 但未配置 VLM_API_KEY，降级为纯 DOM 提取并跳过截图';
+  }
+  return 'VLM 未启用（默认关闭），已跳过截图仅 DOM 提取；需要视觉解析时传 vlmEnabled:true 并配置 VLM_API_KEY';
+}
+
 const server = new McpServer(
   {
     name: 'codesign-prd-mcp',
@@ -113,7 +121,7 @@ const server = new McpServer(
       '   - 超时/中断后可用 pageNames 只重跑指定页：已完成的页有缓存（DOM 未变跳过截图、VLM 结果按内容缓存），重跑秒回。',
       '3. get_page_content 读取单页结构化内容（单页补充细节时用）。',
       '4. VLM 只用于 DOM 提取不到的内容：内嵌图（图内文字）始终单独定向解析；整页分段仅对 DOM 提取不到内容的页面运行（纯图片页、拓扑还原失败的流程图）。表格/规则文字/流程拓扑由 DOM 确定性提取，无需视觉模型。',
-      '5. 未配置 VLM_API_KEY 或传 vlmEnabled:false 时自动降级为纯 DOM 文字提取（流程图/表格解析不可用，其余正常），并跳过截图——截图只为视觉解析服务，纯 DOM 模式不需要，爬取更快。',
+      '5. VLM 默认关闭：纯 DOM 文字提取（流程图/内嵌图解析不可用，其余正常），不截图、爬取更快。需要视觉解析时传 vlmEnabled:true（需已配置 VLM_API_KEY，未配置时自动降级）。',
       '6. url/password 可用环境变量 CODESIGN_URL / CODESIGN_PASSWORD 预置，调用时无需重复传。',
     ].join('\n'),
   }
@@ -175,7 +183,7 @@ server.registerTool(
       vlmEnabled: z
         .boolean()
         .optional()
-        .describe('是否启用 VLM 解析，默认 true；false 时纯 DOM 提取且不截图'),
+        .describe('是否启用 VLM 视觉解析，默认 false（纯 DOM 提取、不截图）；传 true 且已配置 VLM_API_KEY 时启用'),
       detailLevel: z
         .enum(['summary', 'standard', 'full'])
         .optional()
@@ -183,14 +191,14 @@ server.registerTool(
     },
   },
   async (
-    { url, password, pageName, vlmEnabled = true, detailLevel = 'standard' },
+    { url, password, pageName, vlmEnabled, detailLevel = 'standard' },
     extra
   ) => {
     const notify = createProgressNotifier(extra);
     try {
       const access = resolveAccess(url, password);
       // 截图只为 VLM 服务：未启用视觉模型时整条截图链路都不跑（纯 DOM 模式更快）
-      const useVlm = vlmEnabled && isVLMConfigured();
+      const useVlm = vlmEnabled === true && isVLMConfigured();
       // 爬取需要独占浏览器；VLM 只依赖已落盘的截图，放在锁外避免长时间占用
       const pageData = await withBrowserLock(async () => {
         await withHeartbeat(notify, () => ensureOpened(access.url, access.password), { stage: '打开原型' });
@@ -203,7 +211,7 @@ server.registerTool(
       if (useVlm) {
         notify(`页面截图完成（${pageData.segments?.length || 0} 段），开始解析…`);
       } else {
-        notify('未启用 VLM（未配置 VLM_API_KEY 或 vlmEnabled=false），已跳过截图，仅 DOM 提取');
+        notify(vlmDisabledNotice(vlmEnabled));
       }
       const merged = await withHeartbeat(
         notify,
@@ -241,7 +249,7 @@ server.registerTool(
       vlmEnabled: z
         .boolean()
         .optional()
-        .describe('是否启用 VLM 解析，默认 true；false 时纯 DOM 提取且不截图'),
+        .describe('是否启用 VLM 视觉解析，默认 false（纯 DOM 提取、不截图）；传 true 且已配置 VLM_API_KEY 时启用'),
       detailLevel: z
         .enum(['summary', 'standard', 'full'])
         .optional()
@@ -257,14 +265,14 @@ server.registerTool(
     },
   },
   async (
-    { url, password, groupName, vlmEnabled = true, detailLevel = 'standard', outputFile, pageNames },
+    { url, password, groupName, vlmEnabled, detailLevel = 'standard', outputFile, pageNames },
     extra
   ) => {
     try {
       const access = resolveAccess(url, password);
       const notify = createProgressNotifier(extra);
       // 截图只为 VLM 服务：未启用视觉模型时不截图，纯 DOM 爬取明显更快
-      const useVlm = vlmEnabled && isVLMConfigured();
+      const useVlm = vlmEnabled === true && isVLMConfigured();
 
       // 爬取阶段独占浏览器（单页顺序导航无法并行）
       const pagesData = await withBrowserLock(async () => {
@@ -276,7 +284,7 @@ server.registerTool(
         });
       });
       if (!useVlm) {
-        notify('未启用 VLM（未配置 VLM_API_KEY 或 vlmEnabled=false），已跳过截图，仅 DOM 提取');
+        notify(vlmDisabledNotice(vlmEnabled));
       }
 
       // VLM 阶段不碰浏览器，放在锁外；所有页面的分段统一走一次全局并发
