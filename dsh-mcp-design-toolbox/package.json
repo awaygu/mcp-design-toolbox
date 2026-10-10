@@ -1,0 +1,43 @@
+{
+  "name": "dsh-mcp-design-toolbox",
+  "version": "0.1.1",
+  "description": "DeepSeek Harness 插件：把 shimo-mcp / lanhu-design-mcp / codesign-prd-mcp 三个 MCP Server 一键接入 DSH（MCP 代码零改动，纯配置 bundle）",
+  "type": "module",
+  "files": [
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "mcp",
+    "model-context-protocol",
+    "shimo",
+    "lanhu",
+    "codesign",
+    "design-to-code"
+  ],
+  "author": {
+    "name": "awaygu",
+    "url": "https://github.com/awaygu"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/awaygu/mcp-design-toolbox.git",
+    "directory": "dsh-mcp-design-toolbox"
+  },
+  "homepage": "https://github.com/awaygu/mcp-design-toolbox/tree/main/dsh-mcp-design-toolbox#readme",
+  "bugs": {
+    "url": "https://github.com/awaygu/mcp-design-toolbox/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

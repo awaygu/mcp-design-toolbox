@@ -1,0 +1,47 @@
+# dsh-mcp-design-toolbox：把 shimo-mcp / lanhu-design-mcp / codesign-prd-mcp 接入 DSH。
+# 每行实例化内置的 @deepseek-ai/dsh-mcp-client，stdio 拉起 npm 包，工具注册为 mcp__<serverName>__<tool>。
+# 凭据一律走环境变量（SHIMO_COOKIE_FILE / LANHU_COOKIE_FILE / VLM_API_KEY），配置方法见 README。
+# 注意：新增插件实例必须写在 - insert: 列表里；裸 - id/name 行只会按 id 覆盖已有实例。
+
+- insert:
+    - id: mcp-shimo
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: shimo
+        transport: stdio
+        command: !!js 'process.platform === "win32" ? "cmd" : "npx"'
+        args: !!js 'process.platform === "win32" ? ["/c", "npx", "-y", "shimo-mcp"] : ["-y", "shimo-mcp"]'
+        toolCallTimeoutMs: 120000
+        failOnStartupError: true
+        env:
+          SHIMO_COOKIE_FILE: !!js 'process.env.SHIMO_COOKIE_FILE || ""'
+
+    - id: mcp-lanhu
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: lanhu
+        transport: stdio
+        command: !!js 'process.platform === "win32" ? "cmd" : "npx"'
+        args: !!js 'process.platform === "win32" ? ["/c", "npx", "-y", "lanhu-design-mcp"] : ["-y", "lanhu-design-mcp"]'
+        toolCallTimeoutMs: 180000
+        failOnStartupError: true
+        env:
+          VLM_API_KEY: !!js 'process.env.VLM_API_KEY || ""'
+          VLM_BASE_URL: 'https://api.deepseek.com'
+          VLM_MODEL: 'deepseek-v4-flash-vision-exp'
+          LANHU_COOKIE_FILE: !!js 'process.env.LANHU_COOKIE_FILE || ""'
+
+    - id: mcp-codesign
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: codesign
+        transport: stdio
+        command: !!js 'process.platform === "win32" ? "cmd" : "npx"'
+        args: !!js 'process.platform === "win32" ? ["/c", "npx", "-y", "codesign-prd-mcp"] : ["-y", "codesign-prd-mcp"]'
+        toolCallTimeoutMs: 600000
+        failOnStartupError: true
+        cwd: !!js 'process.env.CODESIGN_CACHE_DIR || process.env.TMPDIR || process.env.TEMP || process.env.TMP || "."'
+        env:
+          VLM_API_KEY: !!js 'process.env.VLM_API_KEY || ""'
+          VLM_BASE_URL: 'https://api.deepseek.com'
+          VLM_MODEL: 'deepseek-v4-flash-vision-exp'
